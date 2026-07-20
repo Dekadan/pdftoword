@@ -1,120 +1,114 @@
 # 📖 PDF → Word · Kitap Dönüştürücü
 
 Kitap PDF’lerini, **satırları doğru paragraflara birleştirerek** düzenlenebilir
-Word (`.docx`) dosyasına çeviren, tamamen tarayıcıda çalışan basit bir uygulama.
+Word (`.docx`) dosyasına çeviren araçlar. Yayınevinde 500–600 sayfalık kitapları
+Word’e aktarırken yaşanan dertler için yapıldı:
 
-Yayınevinde 500–600 sayfalık kitapları Word’e aktarırken yaşanan iki dert için yapıldı:
-
-1. **“Her satır ayrı oturuyor, paragraf oluşmuyor.”** Sıradan PDF→Word araçları
-   metni satır satır döker; bu araç satırları okuyup **paragraf bütünlüğünü** kurar.
-2. **“Aşırı kredi/ücret harcamadan yapmak istiyorum.”** Bu araç **hiç kredi/ücret
-   harcamaz**: dönüştürmeyi yapay zekâ değil, sizin bilgisayarınızdaki program yapar.
-
----
-
-## ✅ Neden bu araç?
-
-- **Bedava ve sınırsız.** Bir kez indirdiniz mi, ister 1 kitap ister 100 kitap
-  dönüştürün — masraf yok, kredi yok, abonelik yok.
-- **Çevrimdışı ve gizli.** Dosyalar **hiçbir yere yüklenmez**, internet gerekmez.
-  Kitap bilgisayarınızdan çıkmaz — telif açısından güvenli.
-- **Kelimeleri değiştirmez.** Program metni **yeniden yazmaz**; yalnızca satırları
-  doğru paragraflara yerleştirir, satır sonu tirelerini birleştirir ve tekrar eden
-  üstbilgi/sayfa numaralarını temizler. Cümleler ve kelimeler olduğu gibi kalır.
+1. **“Her satır ayrı oturuyor, paragraf oluşmuyor.”** → Satırlar okunup paragraf
+   bütünlüğü kurulur.
+2. **“Kelimeler bölünüyor: `dışlaya rak`, `de ğil`, `mü cadelenin`.”** → Satır sonu
+   tireleri doğru birleştirilir → `dışlayarak`, `değil`, `mücadelenin`.
+3. **“Aşırı kredi/ücret harcamak istemiyorum.”** → Dönüştürmeyi yapay zekâ değil,
+   sizin bilgisayarınızdaki program yapar: **kullanmak bedava, çevrimdışı, gizli.**
 
 ---
 
-## 🚀 Nasıl kullanılır (3 adım)
+## İki araç var — hangisini kullanmalı?
 
-1. Bu depodaki **`webapp`** klasörünü bilgisayarınıza indirin.
-   (GitHub’da yeşil **Code → Download ZIP** ile tümünü indirip açabilirsiniz.)
-2. `webapp` klasöründeki **`index.html`** dosyasına **çift tıklayın**
-   (Chrome veya Edge önerilir).
-   > ⚠️ `vendor` klasörü `index.html` ile **aynı yerde** kalmalı — birlikte tutun.
-3. PDF’i pencereye **sürükleyip bırakın** (ya da tıklayıp seçin) →
-   **“Word’e Dönüştür”** → `.docx` dosyanız **kendiliğinden inecek**.
+| | **`pdf2word.py`** (Python) | **`webapp/`** (tarayıcı) |
+|---|---|---|
+| Kalite | ⭐ **En iyi** (önerilen) | İyi (basit kitaplarda) |
+| Satır sonu tireleri | ✅ Tam doğru birleştirir | ⚠️ Sınırlı (bkz. not) |
+| Kenar notu / dipnot | ✅ Gövdeyi bölmeden ayırır | Kısmen |
+| Toplu (klasör) işleme | ✅ Var | Tek tek |
+| Kurulum | Python gerekir | ❌ Gerekmez, çift tıkla aç |
+| Maliyet / gizlilik | Bedava, çevrimdışı | Bedava, çevrimdışı |
 
-Birden çok kitabı aynı anda seçebilirsiniz; her biri ayrı Word dosyası olarak iner.
-
----
-
-## ⚙️ Ayarlar ne işe yarar?
-
-| Ayar | Açıklama |
-|------|----------|
-| **Yazı tipi / Punto** | Word dosyasının görünümü (Times New Roman 12 gibi). Metni etkilemez. |
-| **Hizalama** | İki yana yasla (kitap görünümü) veya sola yasla. |
-| **Satır aralığı** | Tek / 1,15 / 1,5 / çift. |
-| **İlk satır girintisi** | Her paragrafın ilk satırı içeriden başlar (kitap görünümü). |
-| **Satır sonu tirelerini birleştir** | `kelime-` + `nin` → `kelimenin`. Büyük harfle başlayan bileşiklerde (`Sovyet-` + `Rusya`) tire korunur. |
-| **Üstbilgi/altbilgi ve sayfa no temizle** | Her sayfada tekrar eden başlık satırlarını ve salt sayfa numarasından oluşan satırları atar. |
-| **Başlıkları algıla** | Gövdeden belirgin büyük puntolu kısa satırları Word’de “Başlık” (Heading) olarak biçimler. |
-
-> **Metni birebir korumak isterseniz:** “Metin işleme” bölümündeki kutuları
-> kapatın. O zaman tire birleştirme ve üstbilgi temizliği yapılmaz; yalnızca
-> satırlar paragraf hâline getirilir.
+> **Neden Python sürümü daha iyi?** Türkçe kitaplarda satır sonları çoğunlukla
+> *yumuşak tire* (görünmez tire) ile bölünür. Tarayıcıdaki pdf.js bu tireyi
+> **siler**, o yüzden `dışlaya` ile `rak` arasına yanlış boşluk girer. Python
+> sürümündeki PyMuPDF tireyi **korur** ve kelimeyi doğru birleştirir. **Gerçek
+> kitaplar için `pdf2word.py` önerilir.**
 
 ---
 
-## 🎯 Ne için uygundur, ne için değildir?
+## 🚀 A) `pdf2word.py` — önerilen yol
 
-**Uygundur:**
-- **Dijital metinli** PDF’ler — yani PDF’i açınca yazıyı fareyle **seçip
-  kopyalayabildiğiniz** kitaplar. (Çoğu yeni/dizgisi yapılmış kitap böyledir.)
-- Tek sütunlu, düz metin ağırlıklı kitaplar (roman, deneme, inceleme…).
-
-**Şu an kapsam dışı / sınırlı:**
-- **Taranmış (fotoğraf) PDF’ler.** Yazıyı seçemiyorsanız PDF taranmıştır; metni
-  çıkarmak için **OCR** gerekir. Bu araç OCR yapmaz. (İhtiyaç olursa OCR’li bir
-  sürüm ayrıca kurulabilir.)
-- **Çok sütunlu sayfalar, karmaşık tablolar, kutu/kenar metinleri** düzgün akmayabilir.
-- **Dipnotlar** gövde metnine karışabilir.
-- **Tire istisnası:** Satır sonunda gerçekten tireli bir bileşik küçük harfle
-  devam ediyorsa (nadiren) yanlışlıkla birleştirilebilir. Böyle kitaplarda
-  “satır sonu tirelerini birleştir” seçeneğini kapatabilirsiniz.
-
-Her dönüştürmeden sonra sayfanın altındaki **önizleme**den paragraf bütünlüğünü
-hızlıca kontrol edebilirsiniz.
-
----
-
-## 💡 İpuçları
-
-- **Büyük kitaplar (500–600 sayfa):** Çift tıklayarak açtığınızda işlem birkaç
-  dakika sürebilir; sekmeyi kapatmayın. Daha hızlı olması için isterseniz klasörü
-  küçük bir yerel sunucuyla açabilirsiniz (geliştiriciler için aşağıya bakın).
-- Sonuç beklediğiniz gibi değilse, ayarlarla oynayın (özellikle girinti ve
-  tire seçenekleri farklı dizgilerde farklı sonuç verir).
-
----
-
-## 🧪 Geliştiriciler için: testler
-
-`tests/` klasöründe, aracın gerçek bir tarayıcıda uçtan uca doğrulandığı otomatik
-testler var (PyMuPDF ile gerçekçi bir test PDF’i üretilir, Playwright ile
-Chromium’da dönüştürülür, çıktı denetlenir). Ayrıntı: [`tests/README.md`](tests/README.md).
-
+### Kurulum (bir kez)
 ```bash
-cd tests
-./run_tests.sh
+pip install -r requirements.txt        # ya da: pip install pymupdf python-docx
 ```
 
-Hızlı yerel sunucu (büyük kitaplarda daha hızlı; gerçek pdf.js worker’ı devreye girer):
+### Kullanım
+```bash
+# Tek kitap:
+python pdf2word.py "Kitap.pdf"                     # Kitap.docx üretir
+python pdf2word.py "Kitap.pdf" "Cikti.docx"
+
+# Bir klasördeki bütün PDF'leri topluca:
+python pdf2word.py "kitaplar_klasoru/"
+
+# Seçenekler:
+python pdf2word.py "Kitap.pdf" --font "Georgia" --size 12 --align left
+python pdf2word.py "Kitap.pdf" --no-dehyphen      # metni birebir koru (tire birleştirme yok)
+python pdf2word.py "Kitap.pdf" --no-headers       # üstbilgi/sayfa no temizliğini kapat
+```
+
+Çıktının sonunda, metin katmanı bozuk (gazete kupürü/şema) sayfalar varsa uyarır:
+```
+⚠ Metin katmanı bozuk görünen sayfalar (OCR gerekebilir): [32, 49, 85, 102, ...]
+```
+
+### Ne yapar
+- Satırları doğru paragraflara toplar (**sayfa sınırlarını da aşarak**).
+- Satır sonu tirelerini birleştirir; büyük harfle başlayan bileşiklerde tireyi
+  korur (`Sovyet-` + `Rusya` → `Sovyet-Rusya`).
+- Apostrof sonrası bölünen ekleri onarır (`Türkiye' nin` → `Türkiye'nin`).
+- Tekrar eden üstbilgi/altbilgi ve salt sayfa numaralarını atar.
+- Büyük puntolu başlıkları Word’de **Heading** olarak biçimler.
+- Küçük puntolu **kenar notu/dipnotları** gövdeye karıştırmaz (ayrı paragraf).
+- **Kelimeleri/cümleleri değiştirmez.**
+
+---
+
+## 🖥️ B) `webapp/` — kurulumsuz tarayıcı yolu
+
+1. `webapp` klasörünü indirin (GitHub’da **Code → Download ZIP**).
+2. İçindeki **`index.html`**’e çift tıklayın (Chrome/Edge). *(`vendor` klasörü yanında kalsın.)*
+3. PDF’i sürükleyin → **“Word’e Dönüştür”** → `.docx` iner.
+
+Kurulum ve internet gerektirmez; kitap bilgisayardan çıkmaz. Basit, dizgisi temiz
+kitaplarda iyi çalışır. Yoğun tireleme içeren kitaplarda en iyi sonuç için
+`pdf2word.py` kullanın.
+
+---
+
+## 🎯 Sınırlar (her iki araç için)
+
+- **Dijital metinli** PDF’ler içindir (yazıyı fareyle seçebildiğiniz kitaplar).
+- **Taranmış** kitaplar veya **gazete kupürü/şema** sayfaları için **OCR** gerekir;
+  bu araçlar OCR yapmaz. `pdf2word.py` bu sayfaları raporlar. *(İstenirse OCR’lı
+  sürüm eklenebilir.)*
+- Çok sütunlu karmaşık düzenler ve tablolar tam oturmayabilir.
+
+---
+
+## 🧪 Testler
+
+`tests/` klasöründe, tarayıcı uygulamasını gerçek bir tarayıcıda uçtan uca
+doğrulayan otomatik testler var. Ayrıntı: [`tests/README.md`](tests/README.md).
 
 ```bash
-cd webapp
-python3 -m http.server 8000
-# tarayıcıda: http://localhost:8000/index.html
+cd tests && ./run_tests.sh
 ```
 
 ---
 
 ## 🔧 Teknik notlar
 
-- **Tamamen istemci tarafı:** metin çıkarımı [pdf.js](https://mozilla.github.io/pdf.js/)
-  (yerel `vendor/` altında), `.docx` üretimi ise elle yazılmış küçük bir OOXML + ZIP
-  yazıcısıyla yapılır. Sunucu yok, ağ isteği yok.
-- **Paragraf birleştirme mantığı:** satır konumları, yazı boyutları, satır aralıkları,
-  paragraf girintileri ve cümle sonu noktalaması okunarak satırlar paragraflara toplanır.
-- Üretilen `.docx`, Microsoft Word / LibreOffice / Google Dokümanlar tarafından açılır.
-- pdf.js Apache-2.0 lisanslıdır; bkz. [`webapp/vendor/README.md`](webapp/vendor/README.md).
+- `pdf2word.py`: **PyMuPDF** (metin + geometri, yumuşak tire korunur) +
+  **python-docx** (çıktı). Paragraf birleştirme; tire onarımı; üstbilgi/altbilgi,
+  başlık ve kenar-notu ayrımı.
+- `webapp/`: **pdf.js** (yerel `vendor/`) + elle yazılmış OOXML+ZIP; tamamen istemci
+  tarafı. pdf.js Apache-2.0’dır (bkz. [`webapp/vendor/README.md`](webapp/vendor/README.md)).
+- Üretilen `.docx`, Microsoft Word / LibreOffice / Google Dokümanlar ile açılır.
