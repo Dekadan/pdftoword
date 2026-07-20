@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Test çıktıları / geçici dosyalar
+tests/.venv/
+tests/*.pdf
+tests/*.docx
+tests/*.txt
+tests/paras*.json
+tests/*.log
+node_modules/
+
+# İşletim sistemi
+.DS_Store
+Thumbs.db

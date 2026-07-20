@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF → Word · Kitap Dönüştürücü</title>
+<style>
+  :root{
+    --bg:#f4f5f7; --card:#ffffff; --ink:#1c2230; --muted:#5c6674;
+    --line:#e2e6ec; --brand:#2f6df6; --brand-ink:#ffffff;
+    --ok:#137a4b; --okbg:#e6f4ec; --warn:#8a5a00; --warnbg:#fdf3e0;
+    --err:#a11; --errbg:#fdeaea; --shadow:0 1px 3px rgba(20,30,60,.08),0 8px 24px rgba(20,30,60,.06);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f1420; --card:#171d2b; --ink:#e8ecf3; --muted:#9aa5b5;
+      --line:#28303f; --brand:#4f86ff; --brand-ink:#0b1220;
+      --ok:#57d69a; --okbg:#12251c; --warn:#e6b566; --warnbg:#2a2110;
+      --err:#ff8b8b; --errbg:#2a1414; --shadow:0 1px 3px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;line-height:1.55}
+  .wrap{max-width:880px;margin:0 auto;padding:28px 18px 80px}
+  header h1{font-size:1.6rem;margin:0 0 4px}
+  header p{margin:0;color:var(--muted)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:20px;margin-top:18px;box-shadow:var(--shadow)}
+  .drop{border:2px dashed var(--line);border-radius:14px;padding:34px 20px;text-align:center;
+    transition:.15s;cursor:pointer;background:transparent}
+  .drop:hover,.drop.hot{border-color:var(--brand);background:color-mix(in srgb,var(--brand) 7%,transparent)}
+  .drop strong{display:block;font-size:1.08rem;margin-bottom:4px}
+  .drop small{color:var(--muted)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px 22px}
+  .field label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:5px;font-weight:600}
+  select,input[type=text],input[type=number]{width:100%;padding:9px 10px;border:1px solid var(--line);
+    border-radius:9px;background:var(--bg);color:var(--ink);font-size:.95rem}
+  .checks{display:flex;flex-direction:column;gap:10px}
+  .chk{display:flex;gap:10px;align-items:flex-start;cursor:pointer;font-size:.92rem}
+  .chk input{margin-top:3px;width:17px;height:17px;flex:none;accent-color:var(--brand)}
+  .chk span small{display:block;color:var(--muted);font-size:.8rem;font-weight:400}
+  .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:6px}
+  button.primary{background:var(--brand);color:var(--brand-ink);border:0;border-radius:10px;
+    padding:12px 22px;font-size:1rem;font-weight:700;cursor:pointer}
+  button.primary:disabled{opacity:.5;cursor:not-allowed}
+  button.ghost{background:transparent;border:1px solid var(--line);color:var(--ink);
+    border-radius:9px;padding:8px 14px;cursor:pointer;font-weight:600}
+  h2{font-size:1.05rem;margin:0 0 12px}
+  .sect-note{color:var(--muted);font-size:.86rem;margin:-4px 0 14px}
+  .bar{height:10px;background:var(--line);border-radius:999px;overflow:hidden}
+  .bar>i{display:block;height:100%;width:0;background:var(--brand);transition:width .2s}
+  .files{list-style:none;padding:0;margin:12px 0 0;display:flex;flex-direction:column;gap:8px}
+  .files li{display:flex;gap:12px;align-items:center;justify-content:space-between;
+    border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--bg)}
+  .files .name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .files .meta{color:var(--muted);font-size:.82rem}
+  .pill{font-size:.76rem;padding:3px 9px;border-radius:999px;font-weight:700;white-space:nowrap}
+  .pill.wait{background:var(--line);color:var(--muted)}
+  .pill.run{background:var(--warnbg);color:var(--warn)}
+  .pill.done{background:var(--okbg);color:var(--ok)}
+  .pill.fail{background:var(--errbg);color:var(--err)}
+  a.dl{background:var(--ok);color:#fff;text-decoration:none;padding:7px 13px;border-radius:8px;
+    font-weight:700;font-size:.85rem;white-space:nowrap}
+  .note{font-size:.86rem;padding:10px 12px;border-radius:9px;margin-top:12px}
+  .note.info{background:var(--warnbg);color:var(--warn)}
+  .preview{white-space:pre-wrap;font-family:Georgia,"Times New Roman",serif;font-size:.92rem;
+    max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:14px;
+    margin-top:12px;background:var(--bg)}
+  .preview p{margin:0 0 .8em;text-align:justify}
+  .muted{color:var(--muted)}
+  footer{margin-top:26px;color:var(--muted);font-size:.82rem;text-align:center}
+  .hide{display:none}
+  code{background:var(--bg);padding:1px 6px;border-radius:6px;border:1px solid var(--line)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>📖 PDF → Word · Kitap Dönüştürücü</h1>
+    <p>Kitap PDF’lerini, satırları doğru paragraflara birleştirerek düzenlenebilir Word (.docx) dosyasına çevirir.</p>
+  </header>
+
+  <div class="note info">
+    🔒 <b>Her şey bu sekmede, bilgisayarınızda çalışır.</b> Dosyalar hiçbir yere yüklenmez, internet gerekmez, ücret/kredi harcanmaz.
+    Program kelimeleri ve cümleleri <b>değiştirmez</b>; yalnızca satırları doğru paragraflara yerleştirir.
+  </div>
+
+  <!-- 1) Dosya seçimi -->
+  <div class="card">
+    <div id="drop" class="drop">
+      <strong>PDF dosyalarını buraya sürükleyin</strong>
+      <small>ya da tıklayıp seçin · birden çok kitap seçebilirsiniz</small>
+      <input id="file" type="file" accept="application/pdf,.pdf" multiple class="hide">
+    </div>
+    <ul id="fileList" class="files"></ul>
+  </div>
+
+  <!-- 2) Ayarlar -->
+  <div class="card">
+    <h2>Word biçimi</h2>
+    <p class="sect-note">Bunlar yalnızca Word dosyasının görünümüdür; metnin kendisini etkilemez.</p>
+    <div class="grid">
+      <div class="field">
+        <label for="font">Yazı tipi</label>
+        <select id="font">
+          <option>Times New Roman</option>
+          <option>Georgia</option>
+          <option>Cambria</option>
+          <option>Calibri</option>
+          <option>Arial</option>
+          <option>Book Antiqua</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="size">Punto</label>
+        <input id="size" type="number" min="8" max="20" step="0.5" value="12">
+      </div>
+      <div class="field">
+        <label for="align">Hizalama</label>
+        <select id="align">
+          <option value="both">İki yana yasla</option>
+          <option value="left">Sola yasla</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="spacing">Satır aralığı</label>
+        <select id="spacing">
+          <option value="240">Tek</option>
+          <option value="276" selected>1,15</option>
+          <option value="360">1,5</option>
+          <option value="480">Çift</option>
+        </select>
+      </div>
+    </div>
+    <div class="row" style="margin-top:16px">
+      <label class="chk"><input type="checkbox" id="optIndent" checked>
+        <span>Paragraf ilk satır girintisi<small>Her paragrafın ilk satırı içeriden başlar (kitap görünümü).</small></span></label>
+    </div>
+  </div>
+
+  <!-- 3) Metin temizleme -->
+  <div class="card">
+    <h2>Metin işleme</h2>
+    <p class="sect-note">Kapatırsanız metin PDF’teki haliyle birebir korunur (paragraf birleştirme yine yapılır).</p>
+    <div class="checks">
+      <label class="chk"><input type="checkbox" id="optDehyph" checked>
+        <span>Satır sonundaki tireli kelimeleri birleştir
+          <small>“kelime‑” + “nin” → “kelimenin”. Büyük harfle başlayan bileşiklerde tire korunur.</small></span></label>
+      <label class="chk"><input type="checkbox" id="optHeaderFooter" checked>
+        <span>Üstbilgi/altbilgi ve sayfa numaralarını temizle
+          <small>Her sayfada tekrar eden başlık satırlarını ve yalnız sayfa numarasından oluşan satırları atar.</small></span></label>
+      <label class="chk"><input type="checkbox" id="optHeadings" checked>
+        <span>Başlıkları algıla
+          <small>Gövdeden belirgin büyük puntolu kısa satırları başlık (Heading) olarak biçimler.</small></span></label>
+    </div>
+  </div>
+
+  <!-- 4) Dönüştür -->
+  <div class="card">
+    <div class="row">
+      <button id="go" class="primary" disabled>Word’e Dönüştür</button>
+      <span id="engineNote" class="muted" style="font-size:.82rem"></span>
+    </div>
+    <div id="progWrap" class="hide" style="margin-top:16px">
+      <div class="bar"><i id="progBar"></i></div>
+      <div id="progText" class="muted" style="font-size:.85rem;margin-top:8px"></div>
+    </div>
+    <ul id="results" class="files"></ul>
+    <div id="previewWrap" class="hide">
+      <h2 style="margin-top:20px">Önizleme <span class="muted" style="font-weight:400;font-size:.82rem">(ilk paragraflar — paragraf bütünlüğünü kontrol edin)</span></h2>
+      <div id="preview" class="preview"></div>
+    </div>
+  </div>
+
+  <footer>
+    Tamamen çevrimdışı çalışır · pdf.js ile metin çıkarımı · Türkçe karakter desteği<br>
+    İpucu: Çok büyük kitaplarda tarayıcı birkaç dakika çalışabilir; sekmeyi kapatmayın.
+  </footer>
+</div>
+
+<script src="vendor/pdf.min.js"></script>
+<script>
+"use strict";
+/* ============================================================================
+   PDF → Word kitap dönüştürücü — tamamen istemci tarafı (tarayıcıda) çalışır.
+   Akış:  PDF -> pdf.js ile satırları çıkar -> üstbilgi/altbilgi temizle ->
+          satırları paragraflara BİRLEŞTİR -> .docx (OOXML+zip) üret -> indir.
+   Kelimeler/cümleler asla değiştirilmez; yalnızca satırlar doğru yere konur.
+   ========================================================================== */
+
+/* pdf.js worker: http üzerinden gerçek worker (hızlı); file:// üzerinde tarayıcı
+   worker'ı engellerse pdf.js otomatik olarak ana iş parçacığına düşer (yavaş ama çalışır). */
+if (window.pdfjsLib) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
+}
+
+/* --- Türkçe harf sınıfları (Unicode özellik kaçışlarına bağımlı kalmadan) --- */
+const L_LOWER = "a-zçğıöşü";
+const L_UPPER = "A-ZÇĞİÖŞÜ";
+const L_ANY   = L_LOWER + L_UPPER;
+const RE_LETTER_HYPHEN = new RegExp("[" + L_ANY + "]-$");
+const RE_STARTS_LOWER  = new RegExp("^[" + L_LOWER + "]");
+const RE_PAGENUM = /^[\s.\-–—·]*\d{1,4}[\s.\-–—·]*$/;               // yalnız sayfa numarası
+const RE_ROMAN   = /^[\s.\-–—·]*[ivxlcdmIVXLCDM]{1,7}[\s.\-–—·]*$/;  // roman sayfa numarası
+const RE_STRONG_END = /[.!?…]["»”’')\]]?$/;                          // cümle bitiren güçlü noktalama
+
+/* ------------------------------- Yardımcılar ------------------------------- */
+const $ = (id) => document.getElementById(id);
+const wordCount = (s) => (s.trim() ? s.trim().split(/\s+/).length : 0);
+const median = (a) => { if (!a.length) return 0; const b = [...a].sort((x, y) => x - y); const m = b.length >> 1; return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2; };
+function mode(vals, round) {
+  const m = new Map(); let best = null, bestN = 0;
+  for (const v of vals) { const k = Math.round(v / round) * round; const n = (m.get(k) || 0) + 1; m.set(k, n); if (n > bestN) { bestN = n; best = k; } }
+  return best == null ? 0 : best;
+}
+function percentile(a, p) { if (!a.length) return 0; const b = [...a].sort((x, y) => x - y); return b[Math.min(b.length - 1, Math.max(0, Math.round((b.length - 1) * p)))]; }
+
+/* =========================== 1) PDF'ten satır çıkarımı ====================== */
+/* Bir sayfanın metin öğelerini görsel satırlara toplar (üstten alta, soldan sağa). */
+function buildLinesFromItems(items, pageW, pageH, pageIndex) {
+  const glyphs = [];
+  for (const it of items) {
+    const s = it.str;
+    if (s == null || s === "") continue;
+    const size = it.height || Math.abs(it.transform[3]) || 10;
+    glyphs.push({ str: s, x: it.transform[4], y: it.transform[5], w: it.width || 0, size });
+  }
+  if (!glyphs.length) return [];
+  // y'ye göre (üstten alta), sonra x'e göre sırala
+  glyphs.sort((a, b) => (b.y - a.y) || (a.x - b.x));
+
+  const lines = [];
+  let cur = null;
+  for (const g of glyphs) {
+    const tol = Math.max(2, g.size * 0.5); // aynı satır sayılan dikey tolerans
+    if (cur && Math.abs(g.y - cur.refY) <= tol) {
+      cur.items.push(g);
+    } else {
+      if (cur) lines.push(cur);
+      cur = { refY: g.y, items: [g] };
+    }
+  }
+  if (cur) lines.push(cur);
+
+  // Her satırı metne çevir; sözcük araları boşlukla
+  const out = [];
+  for (const ln of lines) {
+    ln.items.sort((a, b) => a.x - b.x);
+    let text = "", prevEnd = null, sizes = [], x0 = Infinity, x1 = -Infinity, ys = [];
+    for (const g of ln.items) {
+      if (prevEnd != null) {
+        const gap = g.x - prevEnd;
+        const sp = g.size * 0.25;
+        if (gap > sp && !text.endsWith(" ") && !g.str.startsWith(" ")) text += " ";
+      }
+      text += g.str;
+      prevEnd = g.x + g.w;
+      sizes.push(g.size);
+      x0 = Math.min(x0, g.x);
+      x1 = Math.max(x1, g.x + g.w);
+      ys.push(g.y);
+    }
+    text = text.replace(/[ \t ]+/g, " ").trim();
+    if (!text) continue;
+    out.push({ text, x0, x1, y: median(ys), size: median(sizes), page: pageIndex, pageW, pageH });
+  }
+  return out;
+}
+
+async function extractLines(pdf, onProgress) {
+  const all = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const vp = page.getViewport({ scale: 1 });
+    const tc = await page.getTextContent({ includeMarkedContent: false, disableCombineTextItems: false });
+    const lines = buildLinesFromItems(tc.items, vp.width, vp.height, p);
+    all.push(lines);
+    if (page.cleanup) page.cleanup();
+    if (onProgress) onProgress(p, pdf.numPages);
+    // Ana iş parçacığında çalışırken arayüzün nefes alması için:
+    if (p % 2 === 0) await new Promise((r) => setTimeout(r, 0));
+  }
+  return all; // sayfa sayfa satır dizileri
+}
+
+/* =================== 2) Üstbilgi / altbilgi / sayfa no temizliği ============ */
+function normHF(s) { return s.toLowerCase().replace(/\d+/g, "#").replace(/\s+/g, " ").trim(); }
+
+function stripHeadersFooters(pages) {
+  const nPages = pages.length;
+  if (nPages < 3) return pages; // çok az sayfada risk alma
+  const topCount = new Map(), botCount = new Map();
+  for (const lines of pages) {
+    if (!lines.length) continue;
+    const t = normHF(lines[0].text), b = normHF(lines[lines.length - 1].text);
+    if (wordCount(lines[0].text) <= 8) topCount.set(t, (topCount.get(t) || 0) + 1);
+    if (wordCount(lines[lines.length - 1].text) <= 8) botCount.set(b, (botCount.get(b) || 0) + 1);
+  }
+  const rep = Math.max(3, Math.ceil(nPages * 0.3));
+  const isNum = (s) => RE_PAGENUM.test(s) || RE_ROMAN.test(s.trim());
+
+  return pages.map((lines) => {
+    if (lines.length <= 1) {
+      // tek satır varsa ve o da salt sayfa numarasıysa çıkar
+      if (lines.length === 1 && RE_PAGENUM.test(lines[0].text)) return [];
+      return lines;
+    }
+    let start = 0, end = lines.length;
+    const top = lines[0], bot = lines[end - 1];
+    const topRep = topCount.get(normHF(top.text)) || 0;
+    const botRep = botCount.get(normHF(bot.text)) || 0;
+    if (isNum(top.text) || (wordCount(top.text) <= 8 && topRep >= rep)) start = 1;
+    if (end - start > 0 && (isNum(bot.text) || (wordCount(bot.text) <= 8 && botRep >= rep))) end = end - 1;
+    return lines.slice(start, end);
+  });
+}
+
+/* ========================= 3) Satırları paragraflara birleştir ============== */
+function detectHeadingLevel(line, bodySize) {
+  if (wordCount(line.text) > 14) return 0;
+  if (line.size >= bodySize * 1.6) return 1;
+  if (line.size >= bodySize * 1.28) return 2;
+  return 0;
+}
+
+function assembleParagraphs(pages, opts) {
+  const flat = [];
+  for (const lines of pages) for (const ln of lines) flat.push(ln);
+  if (!flat.length) return [];
+
+  // --- Ölçümler ---
+  const sizes = flat.map((l) => l.size);
+  const bodySize = mode(sizes, 0.5) || median(sizes);
+  const bodyLines = flat.filter((l) => Math.abs(l.size - bodySize) <= 0.6);
+  const ref = bodyLines.length >= 5 ? bodyLines : flat;
+  const bodyLeft = mode(ref.map((l) => l.x0), 3);
+  const rightEdge = percentile(ref.map((l) => l.x1), 0.9);
+  const gaps = [];
+  for (const lines of pages) {
+    for (let i = 1; i < lines.length; i++) {
+      const g = lines[i - 1].y - lines[i].y;
+      if (g > 0 && g < bodySize * 4) gaps.push(g);
+    }
+  }
+  const lineGap = median(gaps) || bodySize * 1.2;
+  const indentThreshold = bodyLeft + Math.max(6, bodySize * 0.9);
+  const shortIf = rightEdge - bodySize * 3.5;
+
+  const paras = [];
+  let cur = null, prev = null, prevWasHeading = false;
+
+  const push = () => { if (cur && cur.text.trim()) paras.push(cur); cur = null; };
+
+  for (const ln of flat) {
+    const hLevel = opts.headings ? detectHeadingLevel(ln, bodySize) : 0;
+    const isHeading = hLevel > 0;
+
+    let newPara = false;
+    if (!cur) newPara = true;
+    else if (isHeading || prevWasHeading || cur.type !== "p") newPara = true;   // başlıktan sonra/önce daima böl
+    else {
+      const samePage = prev && prev.page === ln.page;
+      const gap = samePage ? (prev.y - ln.y) : null;
+      if (gap != null && gap > lineGap * 1.7) newPara = true;                 // boş satır aralığı
+      if (ln.x0 > indentThreshold) newPara = true;                            // ilk satır girintisi
+      if (prev && prev.x1 < shortIf && RE_STRONG_END.test(prev.text)) newPara = true; // kısa + cümle sonu
+    }
+
+    if (newPara) {
+      push();
+      cur = { type: isHeading ? "h" + hLevel : "p", text: ln.text.trim() };
+    } else {
+      appendLine(cur, ln.text, opts.dehyph);
+    }
+    prev = ln;
+    prevWasHeading = isHeading;
+  }
+  push();
+
+  // son temizlik: fazladan boşluk / görünmez tireleri sadeleştir
+  for (const p of paras) {
+    p.text = p.text.replace(/­/g, "").replace(/[ \t ]+/g, " ").trim();
+  }
+  return paras.filter((p) => p.text);
+}
+
+function appendLine(para, lineText, dehyph) {
+  const add = lineText.trim();
+  if (!add) return;
+  if (!para.text) { para.text = add; return; }
+  const prev = para.text;
+  if (prev.endsWith("­")) {                       // yumuşak tire: kesin birleştir
+    para.text = prev.slice(0, -1) + add;
+  } else if (RE_LETTER_HYPHEN.test(prev)) {            // satır sonu tiresi (harf-tire)
+    if (dehyph && RE_STARTS_LOWER.test(add)) para.text = prev.slice(0, -1) + add; // küçük harf: birleştir
+    else para.text = prev + add;                       // büyük harf/bileşik ya da kapalı: tireyi koru, boşluk yok
+  } else {
+    para.text = prev + " " + add;                      // normal: boşlukla ekle
+  }
+}
+
+/* ============================ 4) .docx (OOXML + zip) ======================= */
+function xmlEsc(s) {
+  return s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "")
+          .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+const XML = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+
+function stylesXml(opt) {
+  const sz = Math.round(opt.size * 2);
+  const ind = opt.indent ? 567 : 0; // ~1 cm (twip)
+  return XML +
+  '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+    '<w:docDefaults><w:rPrDefault><w:rPr>' +
+      `<w:rFonts w:ascii="${opt.font}" w:hAnsi="${opt.font}" w:cs="${opt.font}"/>` +
+      `<w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/><w:lang w:val="tr-TR"/>` +
+    '</w:rPr></w:rPrDefault>' +
+    '<w:pPrDefault><w:pPr>' +
+      `<w:spacing w:after="0" w:line="${opt.line}" w:lineRule="auto"/><w:jc w:val="${opt.align}"/>` +
+    '</w:pPr></w:pPrDefault></w:docDefaults>' +
+    `<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:pPr><w:ind w:firstLine="${ind}"/></w:pPr></w:style>` +
+    '<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/>' +
+      '<w:pPr><w:keepNext/><w:spacing w:before="280" w:after="140"/><w:ind w:firstLine="0"/><w:jc w:val="left"/><w:outlineLvl w:val="0"/></w:pPr>' +
+      '<w:rPr><w:b/><w:sz w:val="34"/><w:szCs w:val="34"/></w:rPr></w:style>' +
+    '<w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/>' +
+      '<w:pPr><w:keepNext/><w:spacing w:before="220" w:after="120"/><w:ind w:firstLine="0"/><w:jc w:val="left"/><w:outlineLvl w:val="1"/></w:pPr>' +
+      '<w:rPr><w:b/><w:sz w:val="28"/><w:szCs w:val="28"/></w:rPr></w:style>' +
+  '</w:styles>';
+}
+
+function documentXml(paras) {
+  let body = "";
+  for (const p of paras) {
+    let pPr = "";
+    if (p.type === "h1") pPr = '<w:pPr><w:pStyle w:val="Heading1"/></w:pPr>';
+    else if (p.type === "h2") pPr = '<w:pPr><w:pStyle w:val="Heading2"/></w:pPr>';
+    else if (p.type === "center") pPr = '<w:pPr><w:ind w:firstLine="0"/><w:jc w:val="center"/></w:pPr>';
+    body += `<w:p>${pPr}<w:r><w:t xml:space="preserve">${xmlEsc(p.text)}</w:t></w:r></w:p>`;
+  }
+  return XML +
+  '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
+    body +
+    '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>' +
+    '<w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417" w:header="708" w:footer="708" w:gutter="0"/>' +
+    '</w:sectPr>' +
+  '</w:body></w:document>';
+}
+
+function docParts(paras, opt, title) {
+  const t = xmlEsc(title || "Belge");
+  return [
+    { name: "[Content_Types].xml", str: XML +
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+      '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>' +
+      '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>' +
+      '</Types>' },
+    { name: "_rels/.rels", str: XML +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+      '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>' +
+      '</Relationships>' },
+    { name: "word/document.xml", str: documentXml(paras) },
+    { name: "word/_rels/document.xml.rels", str: XML +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
+      '</Relationships>' },
+    { name: "word/styles.xml", str: stylesXml(opt) },
+    { name: "docProps/core.xml", str: XML +
+      '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/">' +
+      `<dc:title>${t}</dc:title><dc:creator>PDF-Word Kitap Dönüştürücü</dc:creator></cp:coreProperties>` },
+  ];
+}
+
+/* --- Minimal ZIP yazıcı (STORE / deflate-raw) --- */
+const CRC_TABLE = (() => { const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); t[n] = c >>> 0; } return t; })();
+function crc32(u8) { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC_TABLE[(c ^ u8[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+const u16 = (n) => new Uint8Array([n & 255, (n >>> 8) & 255]);
+const u32 = (n) => { n >>>= 0; return new Uint8Array([n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255]); };
+function cat(arr) { let len = 0; for (const a of arr) len += a.length; const o = new Uint8Array(len); let p = 0; for (const a of arr) { o.set(a, p); p += a.length; } return o; }
+async function deflateRaw(u8) {
+  if (typeof CompressionStream === "undefined") return null;
+  try {
+    const cs = new CompressionStream("deflate-raw");
+    const w = cs.writable.getWriter(); w.write(u8); w.close();
+    const ab = await new Response(cs.readable).arrayBuffer();
+    return new Uint8Array(ab);
+  } catch (e) { return null; }
+}
+async function makeZip(files) {
+  const enc = new TextEncoder();
+  const DOSDATE = 0x21; // 1980-01-01, geçerli bir DOS tarihi
+  const chunks = [], central = []; let offset = 0;
+  for (const f of files) {
+    const nameBytes = enc.encode(f.name);
+    const data = f.data;
+    const crc = crc32(data);
+    let method = 0, out = data;
+    const def = await deflateRaw(data);
+    if (def && def.length < data.length) { method = 8; out = def; }
+    const lh = cat([u32(0x04034b50), u16(20), u16(0x0800), u16(method), u16(0), u16(DOSDATE),
+      u32(crc), u32(out.length), u32(data.length), u16(nameBytes.length), u16(0), nameBytes]);
+    chunks.push(lh, out);
+    const ch = cat([u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(method), u16(0), u16(DOSDATE),
+      u32(crc), u32(out.length), u32(data.length), u16(nameBytes.length), u16(0), u16(0), u16(0), u16(0),
+      u32(0), u32(offset), nameBytes]);
+    central.push(ch);
+    offset += lh.length + out.length;
+  }
+  const cd = cat(central);
+  const eocd = cat([u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length),
+    u32(cd.length), u32(offset), u16(0)]);
+  return new Blob([cat([...chunks, cd, eocd])],
+    { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+}
+
+async function buildDocx(paras, opt, title) {
+  const enc = new TextEncoder();
+  const files = docParts(paras, opt, title).map((f) => ({ name: f.name, data: enc.encode(f.str) }));
+  return await makeZip(files);
+}
+
+/* ============================== Uygulama akışı ============================= */
+const state = { files: [] };
+
+function currentOpts() {
+  return {
+    font: $("font").value,
+    size: parseFloat($("size").value) || 12,
+    align: $("align").value,               // both | left
+    line: parseInt($("spacing").value, 10) || 276,
+    indent: $("optIndent").checked,
+    dehyph: $("optDehyph").checked,
+    headers: $("optHeaderFooter").checked,
+    headings: $("optHeadings").checked,
+  };
+}
+
+function renderFileList() {
+  const ul = $("fileList"); ul.innerHTML = "";
+  state.files.forEach((f, i) => {
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="name">📄 ${f.name}</span>
+      <span class="meta">${(f.size / 1048576).toFixed(1)} MB</span>
+      <button class="ghost" data-i="${i}">Kaldır</button>`;
+    ul.appendChild(li);
+  });
+  ul.querySelectorAll("button[data-i]").forEach((b) =>
+    b.addEventListener("click", () => { state.files.splice(+b.dataset.i, 1); renderFileList(); syncGo(); }));
+}
+function syncGo() { $("go").disabled = state.files.length === 0; }
+
+function addFiles(list) {
+  for (const f of list) {
+    if (f.type === "application/pdf" || /\.pdf$/i.test(f.name)) {
+      if (!state.files.some((x) => x.name === f.name && x.size === f.size)) state.files.push(f);
+    }
+  }
+  renderFileList(); syncGo();
+}
+
+/* Drag & drop + seçim */
+const drop = $("drop");
+drop.addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", (e) => addFiles(e.target.files));
+["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("hot"); }));
+["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("hot"); }));
+drop.addEventListener("drop", (e) => { if (e.dataTransfer && e.dataTransfer.files) addFiles(e.dataTransfer.files); });
+
+function setProgress(pct, text) {
+  $("progWrap").classList.remove("hide");
+  $("progBar").style.width = Math.max(0, Math.min(100, pct)) + "%";
+  $("progText").textContent = text || "";
+}
+
+function renderResult(entry) {
+  let li = document.querySelector(`#results li[data-name="${CSS.escape(entry.name)}"]`);
+  if (!li) {
+    li = document.createElement("li");
+    li.dataset.name = entry.name;
+    $("results").appendChild(li);
+  }
+  const pillCls = entry.status === "done" ? "done" : entry.status === "fail" ? "fail" : entry.status === "run" ? "run" : "wait";
+  const pillTxt = entry.status === "done" ? "Hazır" : entry.status === "fail" ? "Hata" : entry.status === "run" ? "İşleniyor…" : "Bekliyor";
+  let right = `<span class="pill ${pillCls}">${pillTxt}</span>`;
+  if (entry.status === "done" && entry.url) {
+    right = `<span class="meta">${entry.paras} paragraf</span> <a class="dl" href="${entry.url}" download="${entry.out}">⬇ İndir (.docx)</a>`;
+  } else if (entry.status === "fail") {
+    right = `<span class="pill fail">Hata</span> <span class="meta">${entry.err || ""}</span>`;
+  }
+  li.innerHTML = `<span class="name">📄 ${entry.name}</span> <span style="display:flex;gap:10px;align-items:center">${right}</span>`;
+}
+
+function showPreview(paras) {
+  const box = $("preview"); box.innerHTML = "";
+  const slice = paras.slice(0, 18);
+  for (const p of slice) {
+    const el = document.createElement(p.type && p.type[0] === "h" ? "b" : "p");
+    if (p.type && p.type[0] === "h") { el.style.display = "block"; el.style.margin = ".6em 0"; }
+    if (p.type === "center") el.style.textAlign = "center";
+    el.textContent = p.text;
+    box.appendChild(el);
+  }
+  $("previewWrap").classList.remove("hide");
+}
+
+async function convertFile(file, opt, onPage) {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  const pdf = await pdfjsLib.getDocument({ data: buf, isEvalSupported: false, disableFontFace: true }).promise;
+  const pagesLines = await extractLines(pdf, onPage);
+  const cleaned = opt.headers ? stripHeadersFooters(pagesLines) : pagesLines;
+  const paras = assembleParagraphs(cleaned, opt);
+  const title = file.name.replace(/\.pdf$/i, "");
+  const blob = await buildDocx(paras, { font: opt.font, size: opt.size, align: opt.align, line: opt.line, indent: opt.indent }, title);
+  if (pdf.destroy) pdf.destroy();
+  return { paras, blob, out: title + ".docx" };
+}
+
+$("go").addEventListener("click", async () => {
+  const opt = currentOpts();
+  $("go").disabled = true;
+  $("results").innerHTML = "";
+  $("previewWrap").classList.add("hide");
+  const files = [...state.files];
+  const total = files.length;
+  let firstPreview = null;
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const entry = { name: file.name, status: "run" };
+    renderResult(entry);
+    try {
+      const res = await convertFile(file, opt, (p, n) => {
+        const base = (i / total) * 100;
+        setProgress(base + (p / n) * (100 / total),
+          `(${i + 1}/${total}) ${file.name} — sayfa ${p}/${n}`);
+      });
+      entry.status = "done";
+      entry.paras = res.paras.length;
+      entry.out = res.out;
+      entry.url = URL.createObjectURL(res.blob);
+      renderResult(entry);
+      if (!firstPreview) firstPreview = res.paras;
+      // otomatik indirme
+      const a = document.createElement("a");
+      a.href = entry.url; a.download = entry.out;
+      document.body.appendChild(a); a.click(); a.remove();
+    } catch (err) {
+      console.error(err);
+      entry.status = "fail"; entry.err = (err && err.message) ? err.message : "Bilinmeyen hata";
+      renderResult(entry);
+    }
+  }
+  setProgress(100, "Tamamlandı ✓");
+  if (firstPreview) showPreview(firstPreview);
+  window.__lastParas = firstPreview;   // test/otomasyon için
+  $("go").disabled = false;
+});
+
+/* Motor / ortam bilgisi */
+(function () {
+  const note = $("engineNote");
+  if (!window.pdfjsLib) { note.textContent = "⚠ pdf.js yüklenemedi (vendor klasörünü kontrol edin)."; $("go").disabled = true; return; }
+  if (location.protocol === "file:") {
+    note.textContent = "Dosyadan açıldı — büyük kitaplarda biraz yavaş olabilir ama sorunsuz çalışır.";
+  }
+})();
+</script>
+</body>
+</html>
