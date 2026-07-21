@@ -13,6 +13,11 @@ tests/paras*.json
 tests/*.log
 node_modules/
 
+# PyInstaller derleme çıktıları
+build/
+dist/
+*.spec
+
 # İşletim sistemi
 .DS_Store
 Thumbs.db

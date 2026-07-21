@@ -1,0 +1,58 @@
+name: Uygulamayı derle (indir-çalıştır)
+
+# Etiket (v...) itilince Windows/Mac/Linux için tek dosyalık uygulamayı derler
+# ve GitHub "Releases" sayfasına ekler. Manuel de çalıştırılabilir (workflow_dispatch).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Bağımlılıklar
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: Derle (tek dosya, pencereli)
+        run: pyinstaller --onefile --windowed --name KitapDonusturucu --collect-all fitz pdf2word_gui.py
+
+      - name: Paketle (işletim sistemine göre .zip)
+        shell: bash
+        run: python -c "import shutil,os;shutil.make_archive('KitapDonusturucu-'+os.environ['RUNNER_OS'],'zip','dist')"
+
+      - name: Yükle (her derlemede indirilebilir)
+        uses: actions/upload-artifact@v4
+        with:
+          name: KitapDonusturucu-${{ runner.os }}
+          path: KitapDonusturucu-*.zip
+
+      - name: Releases'a ekle (etiket itildiğinde)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "Kitap Dönüştürücü ${{ github.ref_name }}" \
+            --notes "PDF'ten Word'e Kitap Dönüştürücü — indir, aç, kullan (kurulum yok).
+
+          • Windows: KitapDonusturucu-Windows.zip indir, aç, KitapDonusturucu.exe'ye çift tıkla.
+            (İlk açılışta 'Windows PC'nizi korudu' çıkarsa: Ek bilgi -> Yine de çalıştır.)
+          • Mac: KitapDonusturucu-macOS.zip indir, aç, uygulamaya SAĞ TIKLA -> Aç.
+          • Tamamen çevrimdışı çalışır; dosyalar bilgisayardan çıkmaz." \
+            || true
+          gh release upload "${{ github.ref_name }}" KitapDonusturucu-*.zip --clobber

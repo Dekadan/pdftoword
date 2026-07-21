@@ -13,22 +13,41 @@ Word’e aktarırken yaşanan dertler için yapıldı:
 
 ---
 
-## İki araç var — hangisini kullanmalı?
+## Üç kullanım yolu — hangisi?
 
-| | **`pdf2word.py`** (Python) | **`webapp/`** (tarayıcı) |
-|---|---|---|
-| Kalite | ⭐ **En iyi** (önerilen) | İyi (basit kitaplarda) |
-| Satır sonu tireleri | ✅ Tam doğru birleştirir | ⚠️ Sınırlı (bkz. not) |
-| Kenar notu / dipnot | ✅ Gövdeyi bölmeden ayırır | Kısmen |
-| Toplu (klasör) işleme | ✅ Var | Tek tek |
-| Kurulum | Python gerekir | ❌ Gerekmez, çift tıkla aç |
-| Maliyet / gizlilik | Bedava, çevrimdışı | Bedava, çevrimdışı |
+| | 🟢 **Uygulama** (indir-çalıştır) | **`pdf2word.py`** (Python) | **`webapp/`** (tarayıcı) |
+|---|---|---|---|
+| Kimin için | **Herkes** (önerilen) | Geliştirici / otomasyon | Hızlı deneme |
+| Kurulum | ❌ Yok — çift tıkla | Python gerekir | ❌ Yok — HTML aç |
+| Kalite (tire birleştirme) | ⭐ En iyi | ⭐ En iyi | ⚠️ Sınırlı (bkz. not) |
+| Toplu (çok kitap) | ✅ | ✅ | Tek tek |
+| Maliyet / gizlilik | Bedava, çevrimdışı | Bedava, çevrimdışı | Bedava, çevrimdışı |
 
-> **Neden Python sürümü daha iyi?** Türkçe kitaplarda satır sonları çoğunlukla
-> *yumuşak tire* (görünmez tire) ile bölünür. Tarayıcıdaki pdf.js bu tireyi
-> **siler**, o yüzden `dışlaya` ile `rak` arasına yanlış boşluk girer. Python
-> sürümündeki PyMuPDF tireyi **korur** ve kelimeyi doğru birleştirir. **Gerçek
-> kitaplar için `pdf2word.py` önerilir.**
+> **Not — neden tarayıcı sürümü daha zayıf?** Türkçe kitaplarda satır sonları
+> çoğunlukla *yumuşak tire* (görünmez tire) ile bölünür. Tarayıcıdaki pdf.js bu
+> tireyi **siler**, o yüzden `dışlaya` ile `rak` arasına yanlış boşluk girer
+> (`dışlaya rak`). **Uygulama** ve **Python** sürümleri PyMuPDF kullanır, tireyi
+> **korur** ve kelimeyi doğru birleştirir (`dışlayarak`). Gerçek kitaplar için
+> **uygulamayı** kullanın.
+
+---
+
+## ⬇️ En kolay yol: uygulamayı indir, aç, kullan
+
+Kurulum yok, Python yok, komut satırı yok. Çift tıkla açılan gerçek bir program.
+
+1. Deponun **[Releases](../../releases)** sayfasına gidin.
+2. Bilgisayarınıza uygun dosyayı indirin:
+   - **Windows:** `KitapDonusturucu-Windows.zip` → açın → `KitapDonusturucu.exe`’ye çift tıklayın.
+     *(İlk açılışta “Windows PC’nizi korudu” çıkarsa: **Ek bilgi → Yine de çalıştır**.)*
+   - **Mac:** `KitapDonusturucu-macOS.zip` → açın → uygulamaya **sağ tıklayın → Aç**.
+3. Açılan pencerede **PDF Seç** → **Word’e Çevir**. Word dosyası PDF’in yanına kaydedilir.
+
+Birden çok kitabı aynı anda seçebilirsiniz. Her şey bilgisayarınızda, çevrimdışı çalışır.
+
+> Uygulama, GitHub tarafından otomatik derlenir (`.github/workflows/build-app.yml`).
+> Yeni sürüm çıkarmak için bir etiket itmek yeterli: `git tag v0.1.0 && git push --tags`.
+> İmzasız olduğu için Windows SmartScreen / Mac Gatekeeper ilk açılışta uyarabilir; yukarıdaki adımlarla açılır.
 
 ---
 
