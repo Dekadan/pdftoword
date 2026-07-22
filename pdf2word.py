@@ -144,15 +144,76 @@ def weird_line(text):
     return alpha / max(1, len(nonspace)) < 0.7
 
 
+# ============================== 0) OCR desteği ==============================
+def find_tessdata():
+    """Türkçe OCR dil dosyasını (tur.traineddata) içeren tessdata klasörünü bul:
+    paketlenmiş uygulama içi -> ortam değişkeni -> sistem yolları."""
+    import glob
+    cands = []
+    if getattr(sys, "_MEIPASS", None):                       # PyInstaller onefile
+        cands.append(os.path.join(sys._MEIPASS, "tessdata"))
+    cands.append(os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "tessdata"))
+    cands.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "tessdata"))
+    env = os.environ.get("TESSDATA_PREFIX")
+    if env:
+        cands += [env, os.path.join(env, "tessdata")]
+    cands += glob.glob("/usr/share/tesseract-ocr/*/tessdata")
+    cands += ["/usr/share/tessdata", "/usr/local/share/tessdata",
+              "/opt/homebrew/share/tessdata",
+              r"C:\Program Files\Tesseract-OCR\tessdata"]
+    for c in cands:
+        if c and os.path.exists(os.path.join(c, "tur.traineddata")):
+            return c
+    return None
+
+
+def choose_ocr_pages(doc, mode):
+    """OCR uygulanacak sayfaları seç.
+    auto: metin katmanı bozuk (çöp) sayfalar + metinsiz taranmış sayfalar.
+    full: tüm sayfalar.  off: hiçbiri.
+    Döner: (sayfa_indeksleri, çöp_sayfa_numaraları)"""
+    garbage = []
+    scanned = []
+    for pno in range(doc.page_count):
+        t = doc[pno].get_text()
+        lines = [l for l in t.split("\n") if l.strip()]
+        g = sum(1 for l in lines if garbage_line(l))
+        if g >= 2:
+            garbage.append(pno)
+        if len(t.strip()) < 25 and doc[pno].get_images():
+            scanned.append(pno)
+    if mode == "off":
+        return set(), garbage
+    if mode == "full":
+        return set(range(doc.page_count)), garbage
+    # auto: taranmış kitap sezgisi — sayfaların çoğu metinsiz görüntüyse hepsini OCR'la
+    if len(scanned) >= max(3, doc.page_count * 0.6):
+        return set(range(doc.page_count)), garbage
+    return set(garbage) | set(scanned), garbage
+
+
 # ============================== 1) satır + dipnot işareti çıkarımı ==========
-def extract_pages(doc):
-    """Sayfa sayfa satırlar; gövdedeki üst simge rakamlar ⟦FNk⟧ olarak işaretlenir."""
+def extract_pages(doc, ocr_pages=None, tessdata=None):
+    """Sayfa sayfa satırlar; gövdedeki üst simge rakamlar ⟦FNk⟧ olarak işaretlenir.
+    ocr_pages içindeki sayfaların metni OCR ile (görüntüden) okunur."""
+    ocr_pages = ocr_pages or set()
+    ocr_done = []
     pages = []
     markers = []          # k sırayla: {"k", "page", "num"}
     for pno in range(doc.page_count):
         page = doc[pno]
         W, H = page.rect.width, page.rect.height
-        d = page.get_text("dict")
+        d = None
+        if pno in ocr_pages and tessdata:
+            try:
+                tp = page.get_textpage_ocr(language="tur", dpi=300, full=True,
+                                           tessdata=tessdata)
+                d = page.get_text("dict", textpage=tp)
+                ocr_done.append(pno)
+            except Exception:
+                d = None                      # OCR başarısızsa normal çıkarıma düş
+        if d is None:
+            d = page.get_text("dict")
         lines = []
         for block in d["blocks"]:
             if block.get("type", 0) != 0:
@@ -221,9 +282,10 @@ def extract_pages(doc):
                     "text": text, "x0": x0, "x1": x1, "y0": y0, "y1": y1,
                     "size": median(sizes) if sizes else main_size,
                     "page": pno, "W": W, "H": H,
+                    "ocr": pno in ocr_pages and bool(tessdata),
                 })
         pages.append({"W": W, "H": H, "lines": lines})
-    return pages, markers
+    return pages, markers, ocr_done
 
 
 # ============================== 2) dipnot metinleri =========================
@@ -539,7 +601,10 @@ def assemble(pages, body_size, opts):
             prev_heading = True
             continue
 
-        hl = heading_level(ln, body_size) if opts.headings else 0
+        # auto-OCR'lanan kupür/şema sayfalarının manşetleri başlık/içindekiler olmasın
+        allow_heading = opts.headings and not (
+            ln.get("ocr") and getattr(opts, "ocr", "auto") != "full")
+        hl = heading_level(ln, body_size) if allow_heading else 0
         is_heading = hl > 0
 
         if not is_heading and cur is not None and is_margin_note(ln):
@@ -773,7 +838,13 @@ def inject_footnotes(path, fn_list, opts):
 # ============================== ana akış ====================================
 def convert(pdf_path, out_path, opts):
     doc = fitz.open(pdf_path)
-    pages, markers = extract_pages(doc)
+
+    ocr_mode = getattr(opts, "ocr", "auto")
+    want_ocr, garbage_idx = choose_ocr_pages(doc, ocr_mode)
+    tessdata = find_tessdata() if want_ocr else None
+    ocr_missing = bool(want_ocr) and tessdata is None
+    pages, markers, ocr_done = extract_pages(
+        doc, want_ocr if tessdata else set(), tessdata)
 
     all_sizes = [l["size"] for pg in pages for l in pg["lines"]]
     body_size = mode_round(all_sizes, 0.5) or median(all_sizes)
@@ -794,12 +865,8 @@ def convert(pdf_path, out_path, opts):
         strip_headers_footers(pages)
     paras = assemble(pages, body_size, opts)
 
-    garbage_pages = []
-    for pno in range(doc.page_count):
-        lines = [l for l in doc[pno].get_text().split("\n") if l.strip()]
-        g = sum(1 for l in lines if garbage_line(l))
-        if g >= 2:
-            garbage_pages.append(pno + 1)
+    ocr_set = set(ocr_done)
+    garbage_pages = [p + 1 for p in garbage_idx if p not in ocr_set]
 
     title = os.path.splitext(os.path.basename(pdf_path))[0]
     write_docx(paras, opts, out_path, title, fn_list, toc_found)
@@ -808,6 +875,8 @@ def convert(pdf_path, out_path, opts):
         "paragraphs": len([p for p in paras if p["text"].strip()]),
         "footnotes": len(fn_list),
         "toc": toc_found,
+        "ocr_pages": [p + 1 for p in ocr_done],
+        "ocr_missing": ocr_missing,
         "garbage_pages": garbage_pages,
     }
 
@@ -833,6 +902,9 @@ def main():
                     help="İçindekileri canlı alana çevirme")
     ap.add_argument("--no-pagenum", dest="pagenum", action="store_false",
                     help="Altbilgiye sayfa numarası koyma")
+    ap.add_argument("--ocr", choices=["auto", "full", "off"], default="auto",
+                    help="OCR: auto=yalnız bozuk/taranmış sayfalar (varsayılan), "
+                         "full=tüm sayfalar (taranmış kitap), off=kapalı")
     ap.set_defaults(indent=True, dehyphen=True, headers=True, headings=True,
                     asides=True, footnotes=True, toc=True, pagenum=True)
     opts = ap.parse_args()
@@ -843,8 +915,12 @@ def main():
             extra.append(f"{r['footnotes']} gerçek dipnot")
         if r["toc"]:
             extra.append("canlı içindekiler")
+        if r.get("ocr_pages"):
+            extra.append(f"OCR uygulanan sayfalar: {r['ocr_pages']}")
+        if r.get("ocr_missing"):
+            extra.append("OCR gerekliydi ama tur.traineddata bulunamadı")
         if r["garbage_pages"]:
-            extra.append(f"OCR gerekebilen sayfalar: {r['garbage_pages']}")
+            extra.append(f"hâlâ bozuk görünen sayfalar: {r['garbage_pages']}")
         print(f"✓ {name}: {r['pages']} sayfa -> {r['paragraphs']} paragraf"
               + ("  [" + " · ".join(extra) + "]" if extra else ""))
 

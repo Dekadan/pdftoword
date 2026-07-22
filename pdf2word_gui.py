@@ -24,11 +24,12 @@ FONTS = ["Times New Roman", "Georgia", "Cambria", "Calibri", "Arial", "Book Anti
 
 def build_opts(font="Times New Roman", size=12.0, align="both", spacing=1.15,
                para_space=6.0, indent=True, dehyphen=True, headers=True,
-               headings=True, asides=True, footnotes=True, toc=True, pagenum=True):
+               headings=True, asides=True, footnotes=True, toc=True, pagenum=True,
+               ocr="auto"):
     return SimpleNamespace(font=font, size=float(size), align=align, spacing=float(spacing),
                            para_space=float(para_space), indent=indent, dehyphen=dehyphen,
                            headers=headers, headings=headings, asides=asides,
-                           footnotes=footnotes, toc=toc, pagenum=pagenum)
+                           footnotes=footnotes, toc=toc, pagenum=pagenum, ocr=ocr)
 
 
 def convert_files(files, opts, outdir=None, progress=None):
@@ -144,10 +145,16 @@ def run_gui():
     ttk.Checkbutton(row2, text="Üstbilgi/sayfa no temizle", variable=v_head).pack(side="left", padx=(0, 14))
     ttk.Checkbutton(row2, text="Başlıkları algıla", variable=v_heading).pack(side="left")
 
+    v_ocr = tk.BooleanVar(value=True)
+
     row3 = ttk.Frame(opt); row3.pack(fill="x", pady=(6, 2))
     ttk.Checkbutton(row3, text="Dipnotları gerçek Word dipnotu yap", variable=v_fn).pack(side="left", padx=(0, 14))
     ttk.Checkbutton(row3, text="Canlı İçindekiler alanı", variable=v_toc).pack(side="left", padx=(0, 14))
     ttk.Checkbutton(row3, text="Sayfa numarası (altbilgi)", variable=v_pgnum).pack(side="left")
+
+    row4 = ttk.Frame(opt); row4.pack(fill="x", pady=(6, 2))
+    ttk.Checkbutton(row4, text="Bozuk/taranmış sayfalara OCR uygula (Türkçe; biraz yavaşlatır)",
+                    variable=v_ocr).pack(side="left")
 
     # --- Çevir + durum ---
     act = ttk.Frame(main); act.pack(fill="x", pady=(12, 0))
@@ -189,6 +196,7 @@ def run_gui():
             para_space=v_pspace.get(),
             dehyphen=v_dehyph.get(), headers=v_head.get(), headings=v_heading.get(),
             footnotes=v_fn.get(), toc=v_toc.get(), pagenum=v_pgnum.get(),
+            ocr="auto" if v_ocr.get() else "off",
         )
         go_btn.config(state="disabled")
         open_btn.config(state="disabled")
@@ -229,6 +237,8 @@ def run_gui():
                 bits.append(f"{r['footnotes']} gerçek dipnot")
             if r.get("toc"):
                 bits.append("canlı içindekiler")
+            if r.get("ocr_pages"):
+                bits.append(f"{len(r['ocr_pages'])} sayfaya OCR")
             extra = f"  ⚠ OCR gerekebilen sayfalar: {gp}" if gp else ""
             lines.append(f"• {os.path.basename(r['out'])}  ({', '.join(bits)}){extra}")
         for r in bad:
@@ -255,7 +265,8 @@ def main():
         r = res[0]
         if r.get("ok"):
             print(f"SELFTEST OK: {r['out']}  ({r['paragraphs']} paragraf, {r['pages']} sayfa, "
-                  f"{r.get('footnotes', 0)} dipnot, içindekiler={r.get('toc')})")
+                  f"{r.get('footnotes', 0)} dipnot, içindekiler={r.get('toc')}, "
+                  f"OCR sayfaları={r.get('ocr_pages')})")
             # istenen çıktı adına taşı
             if sys.argv[3] and sys.argv[3] != r["out"]:
                 os.replace(r["out"], sys.argv[3])

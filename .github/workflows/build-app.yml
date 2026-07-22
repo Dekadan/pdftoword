@@ -19,7 +19,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
+        include:
+          - os: windows-latest
+            sep: ";"
+          - os: macos-latest
+            sep: ":"
+          - os: ubuntu-latest
+            sep: ":"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -31,8 +37,8 @@ jobs:
       - name: Bağımlılıklar
         run: pip install -r requirements.txt pyinstaller
 
-      - name: Derle (tek dosya, pencereli)
-        run: pyinstaller --onefile --windowed --name KitapDonusturucu --collect-all fitz --collect-all docx pdf2word_gui.py
+      - name: Derle (tek dosya, pencereli; Türkçe OCR dil dosyası gömülü)
+        run: pyinstaller --onefile --windowed --name KitapDonusturucu --collect-all fitz --collect-all docx --add-data "tessdata${{ matrix.sep }}tessdata" pdf2word_gui.py
 
       - name: Paketle (işletim sistemine göre .zip)
         shell: bash

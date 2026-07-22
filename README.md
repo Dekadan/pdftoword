@@ -79,13 +79,23 @@ python pdf2word.py "Kitap.pdf" --no-headers       # üstbilgi/sayfa no temizliğ
 ```
 
 ### Ne yapar
-- Satırları doğru paragraflara toplar (**sayfa sınırlarını da aşarak**).
+- Satırları doğru paragraflara toplar (**sayfa sınırlarını da aşarak**);
+  paragraf araları boşluklu (`--para-space`, varsayılan 6 punto).
 - Satır sonu tirelerini birleştirir; büyük harfle başlayan bileşiklerde tireyi
   korur (`Sovyet-` + `Rusya` → `Sovyet-Rusya`).
 - Apostrof sonrası bölünen ekleri onarır (`Türkiye' nin` → `Türkiye'nin`).
+- **DİPNOTLAR:** gövdedeki işaret rakamlarıyla sayfa altındaki notları eşleştirip
+  **gerçek Word dipnotu** yapar (sayfa altında, otomatik numaralı). Eşleşmeyen
+  not kaybolmaz, küçük italik paragraf olarak kalır.
+- **İÇİNDEKİLER:** PDF’teki içindekiler sayfalarını söker, yerine Word’ün
+  **canlı İçindekiler alanını** koyar — açılışta başlıklardan kendiliğinden
+  dolar, sayfa numaralarını Word doğru basar.
+- **OCR:** metin katmanı bozuk sayfaları (gazete kupürü/şema) ve tümüyle
+  **taranmış kitapları** görüntüden okur (Türkçe; `--ocr auto|full|off`).
+- Altbilgiye **sayfa numarası** alanı; A4 kâğıt + 2,5 cm kitap marjları.
 - Tekrar eden üstbilgi/altbilgi ve salt sayfa numaralarını atar.
-- Büyük puntolu başlıkları Word’de **Heading** olarak biçimler.
-- Küçük puntolu **kenar notu/dipnotları** gövdeye karıştırmaz (ayrı paragraf).
+- Başlıkları tanır (`BÖLÜM`, BÜYÜK HARF, `V.2.` desenleri) → Heading 1-3.
+- Küçük puntolu **kenar notlarını** gövdeyi bölmeden ayırır.
 - **Kelimeleri/cümleleri değiştirmez.**
 
 ---
@@ -102,13 +112,16 @@ kitaplarda iyi çalışır. Yoğun tireleme içeren kitaplarda en iyi sonuç iç
 
 ---
 
-## 🎯 Sınırlar (her iki araç için)
+## 🎯 Sınırlar
 
-- **Dijital metinli** PDF’ler içindir (yazıyı fareyle seçebildiğiniz kitaplar).
-- **Taranmış** kitaplar veya **gazete kupürü/şema** sayfaları için **OCR** gerekir;
-  bu araçlar OCR yapmaz. `pdf2word.py` bu sayfaları raporlar. *(İstenirse OCR’lı
-  sürüm eklenebilir.)*
+- **Uygulama ve Python sürümü** taranmış kitapları ve bozuk sayfaları **OCR ile**
+  okur (Türkçe dil dosyası gömülü). OCR sonucu, taramanın kalitesine bağlıdır —
+  düşük çözünürlüklü gazete kupürlerinde hata kalabilir; araç bu sayfaları raporlar.
+- Tarayıcı sürümü (webapp) OCR yapmaz; dijital metinli PDF’ler içindir.
 - Çok sütunlu karmaşık düzenler ve tablolar tam oturmayabilir.
+- Word, metni yeniden akıttığı için sayfalar PDF ile birebir aynı yerde bölünmez;
+  sayfa numaraları ve içindekiler **Word’ün kendi düzenine göre** doğrudur
+  (baskı öncesi taslakta istenen de budur).
 
 ---
 
