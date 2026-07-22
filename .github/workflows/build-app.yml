@@ -32,7 +32,7 @@ jobs:
         run: pip install -r requirements.txt pyinstaller
 
       - name: Derle (tek dosya, pencereli)
-        run: pyinstaller --onefile --windowed --name KitapDonusturucu --collect-all fitz pdf2word_gui.py
+        run: pyinstaller --onefile --windowed --name KitapDonusturucu --collect-all fitz --collect-all docx pdf2word_gui.py
 
       - name: Paketle (işletim sistemine göre .zip)
         shell: bash

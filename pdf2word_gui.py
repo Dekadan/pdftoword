@@ -23,10 +23,12 @@ FONTS = ["Times New Roman", "Georgia", "Cambria", "Calibri", "Arial", "Book Anti
 
 
 def build_opts(font="Times New Roman", size=12.0, align="both", spacing=1.15,
-               indent=True, dehyphen=True, headers=True, headings=True, asides=True):
+               para_space=6.0, indent=True, dehyphen=True, headers=True,
+               headings=True, asides=True, footnotes=True, toc=True, pagenum=True):
     return SimpleNamespace(font=font, size=float(size), align=align, spacing=float(spacing),
-                           indent=indent, dehyphen=dehyphen, headers=headers,
-                           headings=headings, asides=asides)
+                           para_space=float(para_space), indent=indent, dehyphen=dehyphen,
+                           headers=headers, headings=headings, asides=asides,
+                           footnotes=footnotes, toc=toc, pagenum=pagenum)
 
 
 def convert_files(files, opts, outdir=None, progress=None):
@@ -119,6 +121,11 @@ def run_gui():
     v_head = tk.BooleanVar(value=True)
     v_heading = tk.BooleanVar(value=True)
 
+    v_pspace = tk.DoubleVar(value=6.0)
+    v_fn = tk.BooleanVar(value=True)
+    v_toc = tk.BooleanVar(value=True)
+    v_pgnum = tk.BooleanVar(value=True)
+
     row1 = ttk.Frame(opt); row1.pack(fill="x", pady=2)
     ttk.Label(row1, text="Yazı tipi:").pack(side="left")
     ttk.Combobox(row1, textvariable=v_font, values=FONTS, width=18, state="readonly").pack(side="left", padx=(4, 14))
@@ -128,10 +135,19 @@ def run_gui():
     ttk.Combobox(row1, textvariable=v_align, values=["İki yana yasla", "Sola yasla"], width=13,
                  state="readonly").pack(side="left", padx=(4, 0))
 
+    row1b = ttk.Frame(opt); row1b.pack(fill="x", pady=(6, 2))
+    ttk.Label(row1b, text="Paragraf arası boşluk (punto):").pack(side="left")
+    ttk.Spinbox(row1b, from_=0, to=24, increment=1, textvariable=v_pspace, width=5).pack(side="left", padx=(4, 0))
+
     row2 = ttk.Frame(opt); row2.pack(fill="x", pady=(6, 2))
     ttk.Checkbutton(row2, text="Satır sonu tirelerini birleştir", variable=v_dehyph).pack(side="left", padx=(0, 14))
     ttk.Checkbutton(row2, text="Üstbilgi/sayfa no temizle", variable=v_head).pack(side="left", padx=(0, 14))
     ttk.Checkbutton(row2, text="Başlıkları algıla", variable=v_heading).pack(side="left")
+
+    row3 = ttk.Frame(opt); row3.pack(fill="x", pady=(6, 2))
+    ttk.Checkbutton(row3, text="Dipnotları gerçek Word dipnotu yap", variable=v_fn).pack(side="left", padx=(0, 14))
+    ttk.Checkbutton(row3, text="Canlı İçindekiler alanı", variable=v_toc).pack(side="left", padx=(0, 14))
+    ttk.Checkbutton(row3, text="Sayfa numarası (altbilgi)", variable=v_pgnum).pack(side="left")
 
     # --- Çevir + durum ---
     act = ttk.Frame(main); act.pack(fill="x", pady=(12, 0))
@@ -170,7 +186,9 @@ def run_gui():
             font=v_font.get(),
             size=v_size.get(),
             align="both" if v_align.get().startswith("İki") else "left",
+            para_space=v_pspace.get(),
             dehyphen=v_dehyph.get(), headers=v_head.get(), headings=v_heading.get(),
+            footnotes=v_fn.get(), toc=v_toc.get(), pagenum=v_pgnum.get(),
         )
         go_btn.config(state="disabled")
         open_btn.config(state="disabled")
@@ -206,8 +224,13 @@ def run_gui():
         lines = [f"{len(ok)} dosya başarıyla çevrildi." if ok else "Hiç dosya çevrilemedi."]
         for r in ok:
             gp = r.get("garbage_pages") or []
+            bits = [f"{r['paragraphs']} paragraf"]
+            if r.get("footnotes"):
+                bits.append(f"{r['footnotes']} gerçek dipnot")
+            if r.get("toc"):
+                bits.append("canlı içindekiler")
             extra = f"  ⚠ OCR gerekebilen sayfalar: {gp}" if gp else ""
-            lines.append(f"• {os.path.basename(r['out'])}  ({r['paragraphs']} paragraf){extra}")
+            lines.append(f"• {os.path.basename(r['out'])}  ({', '.join(bits)}){extra}")
         for r in bad:
             lines.append(f"✗ {os.path.basename(r['file'])} — {r.get('error')}")
         status.config(text=lines[0])
@@ -231,7 +254,8 @@ def main():
         res = convert_files([sys.argv[2]], opts, outdir=None)
         r = res[0]
         if r.get("ok"):
-            print(f"SELFTEST OK: {r['out']}  ({r['paragraphs']} paragraf, {r['pages']} sayfa)")
+            print(f"SELFTEST OK: {r['out']}  ({r['paragraphs']} paragraf, {r['pages']} sayfa, "
+                  f"{r.get('footnotes', 0)} dipnot, içindekiler={r.get('toc')})")
             # istenen çıktı adına taşı
             if sys.argv[3] and sys.argv[3] != r["out"]:
                 os.replace(r["out"], sys.argv[3])
