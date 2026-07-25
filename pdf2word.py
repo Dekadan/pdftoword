@@ -634,7 +634,7 @@ def assemble(pages, body_size, opts, scanned=False):
     short_if = right_edge - body_size * 3.5
 
     def is_margin_note(ln):
-        if not opts.asides:
+        if not opts.asides or scanned:   # OCR'da x konumları oynak: kenar notu arama
             return False
         narrow = (ln["x1"] - ln["x0"]) < 0.55 * body_width
         offset = ln["x0"] > body_left + 3.0 * body_size
@@ -685,6 +685,10 @@ def assemble(pages, body_size, opts, scanned=False):
         # gazete manşetleri başlık/içindekiler'e sızmasın.
         allow_heading = opts.headings and (
             scanned or not ln.get("ocr") or getattr(opts, "ocr", "auto") == "full")
+        # Kapak/iç kapak/künye satırları (yayınevi adı, adres, basım bilgisi) başlık
+        # sayılmamalı — yoksa İçindekiler'i kirletirler.
+        if allow_heading and front_matter(ln) and not RE_CHAPTER_WORD.search(ln["text"]):
+            allow_heading = False
         hl = heading_level(ln, body_size) if allow_heading else 0
         is_heading = hl > 0
 
@@ -1054,7 +1058,9 @@ def main():
         if r["toc"]:
             extra.append("canlı içindekiler")
         if r.get("ocr_pages"):
-            extra.append(f"OCR uygulanan sayfalar: {r['ocr_pages']}")
+            op = r["ocr_pages"]
+            extra.append(f"{len(op)} sayfa OCR ile okundu"
+                         if len(op) > 12 else f"OCR uygulanan sayfalar: {op}")
         if r.get("ocr_missing"):
             extra.append("OCR gerekliydi ama tur.traineddata bulunamadı")
         if r["garbage_pages"]:
