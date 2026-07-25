@@ -1020,6 +1020,33 @@ def main():
                     asides=True, footnotes=True, toc=True, pagenum=True)
     opts = ap.parse_args()
 
+    def make_progress(label):
+        """Komut satırında canlı ilerleme: uzun OCR işlerinde donmuş gibi
+        görünmesin diye aynı satırı güncelleyerek sayfa sayar."""
+        import time as _t
+        st = {"t0": _t.time(), "last": 0.0}
+
+        def on_page(p, tot, is_ocr):
+            now = _t.time()
+            if p + 1 < tot and now - st["last"] < 0.5:
+                return                      # ekranı gereksiz meşgul etme
+            st["last"] = now
+            el = int(now - st["t0"])
+            pct = (p + 1) * 100 // max(1, tot)
+            eta = ""
+            if p >= 2:
+                per = (now - st["t0"]) / (p + 1)
+                kalan = int(per * (tot - p - 1))
+                eta = f" · tahmini kalan {kalan // 60}dk {kalan % 60}sn"
+            tag = " · OCR" if is_ocr else ""
+            sys.stdout.write(f"\r  {label}: sayfa {p + 1}/{tot} (%{pct}){tag}"
+                             f" · geçen {el // 60}dk {el % 60}sn{eta}      ")
+            sys.stdout.flush()
+            if p + 1 == tot:
+                sys.stdout.write("\r" + " " * 78 + "\r")
+                sys.stdout.flush()
+        return on_page
+
     def report(name, r):
         extra = []
         if r["footnotes"]:
@@ -1042,10 +1069,12 @@ def main():
         for f in pdfs:
             src = os.path.join(opts.input, f)
             dst = os.path.splitext(src)[0] + ".docx"
-            report(f, convert(src, dst, opts))
+            report(f, convert(src, dst, opts, on_page=make_progress(f)))
     else:
         out = opts.output or (os.path.splitext(opts.input)[0] + ".docx")
-        report(os.path.basename(out), convert(opts.input, out, opts))
+        report(os.path.basename(out),
+               convert(opts.input, out, opts,
+                       on_page=make_progress(os.path.basename(opts.input))))
 
 
 if __name__ == "__main__":
