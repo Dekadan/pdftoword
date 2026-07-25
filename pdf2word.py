@@ -210,14 +210,17 @@ def choose_ocr_pages(doc, mode):
 
 
 # ============================== 1) satır + dipnot işareti çıkarımı ==========
-def extract_pages(doc, ocr_pages=None, tessdata=None):
+def extract_pages(doc, ocr_pages=None, tessdata=None, on_page=None):
     """Sayfa sayfa satırlar; gövdedeki üst simge rakamlar ⟦FNk⟧ olarak işaretlenir.
-    ocr_pages içindeki sayfaların metni OCR ile (görüntüden) okunur."""
+    ocr_pages içindeki sayfaların metni OCR ile (görüntüden) okunur.
+    on_page(okunan, toplam, ocr_mu) çağrılırsa ilerleme bildirilir."""
     ocr_pages = ocr_pages or set()
     ocr_done = []
     pages = []
     markers = []          # k sırayla: {"k", "page", "num"}
     for pno in range(doc.page_count):
+        if on_page:
+            on_page(pno, doc.page_count, pno in ocr_pages and bool(tessdata))
         page = doc[pno]
         W, H = page.rect.width, page.rect.height
         d = None
@@ -900,7 +903,8 @@ def inject_footnotes(path, fn_list, opts):
 
 
 # ============================== ana akış ====================================
-def convert(pdf_path, out_path, opts):
+def convert(pdf_path, out_path, opts, on_page=None):
+    """on_page(okunan_sayfa, toplam, ocr_mu) verilirse ilerleme bildirilir."""
     doc = fitz.open(pdf_path)
 
     ocr_mode = getattr(opts, "ocr", "auto")
@@ -908,7 +912,7 @@ def convert(pdf_path, out_path, opts):
     tessdata = find_tessdata() if want_ocr else None
     ocr_missing = bool(want_ocr) and tessdata is None
     pages, markers, ocr_done = extract_pages(
-        doc, want_ocr if tessdata else set(), tessdata)
+        doc, want_ocr if tessdata else set(), tessdata, on_page)
 
     all_sizes = [l["size"] for pg in pages for l in pg["lines"]]
     body_size = mode_round(all_sizes, 0.5) or median(all_sizes)
