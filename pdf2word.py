@@ -66,7 +66,9 @@ RARE_CHARS = set("ąăĄ*=>~^`|ª•■□▪")
 FN_TOKEN = "⟦FN%d⟧"                    # ⟦FN7⟧ — dipnot yer tutucusu
 RE_FN_TOKEN = re.compile("⟦FN(\\d+)⟧")
 TOC_TOKEN = "⟦TOCFIELD⟧"               # içindekiler alanı yer tutucusu
-RE_NOTE_START = re.compile(r"^(\d{1,3})[.)]?\s+(\S.*)$")
+# Dipnot metni başı: "12 Doğu Perinçek…" ya da boşluksuz "12Doğu Perinçek…"
+RE_NOTE_START = re.compile(r"^(\d{1,3})[.)]?(?:\s+(\S.*)|([" + UPPER + r"\"«“].*))$")
+RE_TRAIL_NUM = re.compile(r"\s(\d{1,3})\s*$")     # satır sonuna düşmüş sonraki not numarası
 RE_TOC_ENTRY = re.compile(r".{3,}\s\d{1,4}\s*$")
 RE_HEAD_NUM = re.compile(r"^((?:[IVXLCDM]+|\d+)(?:\.(?:\d+|[IVXLCDM]+))*)[.)]?\s+\S")
 RE_CHAPTER_WORD = re.compile(
@@ -131,6 +133,21 @@ def garbage_line(line):
         return False
     bad = sum(1 for w in toks if _token_garbage(w))
     return bad / len(toks) >= 0.30
+
+
+def ocr_junk(text):
+    """OCR'lanan kapak/görsel sayfalarından gelen anlamsız kırıntı satırı
+    ("|", "kz", "~-" gibi). Yalnızca OCR'lı satırlara uygulanır."""
+    s = text.strip()
+    if not s:
+        return True
+    for tok in s.split():
+        core = "".join(c for c in tok if c.isalpha())
+        if len(core) >= 2 and any(c in VOWELS for c in core):
+            return False          # sesli harfli, gerçek kelimeye benzer parça var
+        if tok.isdigit():
+            return False          # sayfa numarası vb. — burada eleme
+    return True
 
 
 def weird_line(text):
@@ -284,6 +301,11 @@ def extract_pages(doc, ocr_pages=None, tessdata=None):
                     "page": pno, "W": W, "H": H,
                     "ocr": pno in ocr_pages and bool(tessdata),
                 })
+        # Blok sırası PDF içeriğinde görsel sırayla aynı olmak zorunda değil;
+        # satırları okuma sırasına (üstten alta, soldan sağa) diz.
+        lines.sort(key=lambda l: (round(l["y0"], 1), l["x0"]))
+        if pno in ocr_pages and tessdata:      # kapak/görsel OCR kırıntılarını at
+            lines = [l for l in lines if not ocr_junk(l["text"])]
         pages.append({"W": W, "H": H, "lines": lines})
     return pages, markers, ocr_done
 
@@ -302,18 +324,51 @@ def collect_footnotes(pages, body_size, dehyphen):
             m = RE_NOTE_START.match(ln["text"]) if (small and bottom) else None
             if m and (cur is None or ln["y0"] >= cur["last_y"]):
                 num = m.group(1)
-                cur = {"num": num, "text": m.group(2).strip(),
+                cur = {"num": num, "text": (m.group(2) or m.group(3) or "").strip(),
                        "lines": [ln], "last_y": ln["y0"]}
                 page_notes.setdefault(num, cur)
             elif cur is not None and small and bottom and ln["y0"] >= cur["last_y"]:
-                _join(cur, ln["text"], dehyphen)
-                cur["lines"].append(ln)
-                cur["last_y"] = ln["y0"]
+                # Bir sonraki notun numarası, bu notun son satırının SONUNA
+                # düşmüş olabilir ("… s.273. 16" + sonraki satır "Adnan Akfırat…").
+                m2 = RE_TRAIL_NUM.search(cur["text"])
+                starts_new = (m2 and int(m2.group(1)) == int(cur["num"]) + 1
+                              and re.match("^[" + UPPER + r"\"«“]", ln["text"].strip()))
+                if starts_new:
+                    nxt = m2.group(1)
+                    cur["text"] = cur["text"][:m2.start()].rstrip()
+                    cur = {"num": nxt, "text": ln["text"].strip(),
+                           "lines": [ln], "last_y": ln["y0"]}
+                    page_notes.setdefault(nxt, cur)
+                else:
+                    _join(cur, ln["text"], dehyphen)
+                    cur["lines"].append(ln)
+                    cur["last_y"] = ln["y0"]
             else:
                 cur = None
         if page_notes:
             notes[pi] = page_notes
     return notes
+
+
+RE_OPEN_END = re.compile(r"[,;:(\[«“„\-–—]$")     # açık uçlu bitiş (virgül, tire…)
+
+
+def is_continuation(prev_text, next_text):
+    """Önceki satır cümle ortasında bitip bu satır küçük harfle başlıyorsa,
+    bu bir paragraf devamıdır — sayfa geometrisi (girinti/satır aralığı) ne
+    derse desin. Kitaplarda gerçek bir paragraf küçük harfle başlamaz."""
+    a = (prev_text or "").strip()
+    b = (next_text or "").strip()
+    if not a or not b:
+        return False
+    b0 = RE_FN_TOKEN.sub("", b).lstrip()          # dipnot işaretini atla
+    if not b0 or not RE_STARTS_LOWER.match(b0):
+        return False
+    if a.endswith(SOFT) or RE_LETTER_HYPHEN.search(a):   # kelime ortasından bölünmüş
+        return True
+    if RE_STRONG_END.search(a):                          # cümle gerçekten bitmiş
+        return False
+    return True                                          # noktalamasız kesilmiş
 
 
 def _join(par, add, dehyphen):
@@ -632,6 +687,15 @@ def assemble(pages, body_size, opts):
                 new_par = True
             if prev and prev["x1"] < short_if and RE_STRONG_END.search(prev["text"].strip()):
                 new_par = True
+
+        # DİL KURALI geometriyi ezer: önceki satır cümle ortasında bittiyse
+        # (tireyle ya da noktalamasız) ve bu satır küçük harfle başlıyorsa, bu
+        # aynı paragrafın devamıdır — sayfa düzeni ne derse desin. Punto oynaklığı
+        # yüzünden satır yanlışlıkla "dipnot/kenar notu" sınıfına düşse bile geçerli.
+        if (new_par and cur is not None and not is_heading and not prev_heading
+                and cur["type"] in ("p", "aside") and kind in ("p", "aside")
+                and is_continuation(cur["text"], ln["text"])):
+            new_par = False
 
         if new_par:
             push_body()

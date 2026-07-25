@@ -36,5 +36,11 @@ NODE_PATH="$(npm root -g)" node test_run.js \
   "http://127.0.0.1:$PORT/index.html" \
   "$PWD/test_kitap.pdf" "$PWD/out.docx" "$PWD/paras.json"
 
-echo "== Denetimler =="
+echo "== Denetimler (tarayıcı uygulaması) =="
 python assert.py
+
+echo
+echo "== Zor düzen testi (pdf2word motoru: paragraf birleştirme + tire onarımı) =="
+python make_hard_pdf.py
+python ../pdf2word.py test_zor.pdf zor.docx --no-toc --no-pagenum >/dev/null
+python assert_hard.py zor.docx
