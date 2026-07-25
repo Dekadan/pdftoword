@@ -297,12 +297,17 @@ def extract_pages(doc, ocr_pages=None, tessdata=None, on_page=None):
                 text = re.sub(r"[ \t ]+", " ", "".join(parts)).strip()
                 if not text:
                     continue
+                # Kalin yazi orani (baslik taniminda kullanilir; flags bit 4 = bold)
+                nchar = sum(len(s["text"].strip()) for s in spans if s["text"].strip())
+                nbold = sum(len(s["text"].strip()) for s in spans
+                            if s["text"].strip() and (s["flags"] & 16))
                 x0, y0, x1, y1 = ln["bbox"]
                 lines.append({
                     "text": text, "x0": x0, "x1": x1, "y0": y0, "y1": y1,
                     "size": median(sizes) if sizes else main_size,
                     "page": pno, "W": W, "H": H,
                     "ocr": pno in ocr_pages and bool(tessdata),
+                    "bold": nchar > 0 and nbold / nchar >= 0.8,
                 })
         # Blok sırası PDF içeriğinde görsel sırayla aynı olmak zorunda değil;
         # satırları okuma sırasına (üstten alta, soldan sağa) diz.
@@ -354,6 +359,11 @@ def collect_footnotes(pages, body_size, dehyphen):
 
 
 RE_OPEN_END = re.compile(r"[,;:(\[«“„\-–—]$")     # açık uçlu bitiş (virgül, tire…)
+
+
+def all_caps(s):
+    letters = [c for c in s if c.isalpha()]
+    return bool(letters) and all(c.isupper() for c in letters)
 
 
 def is_continuation(prev_text, next_text):
@@ -597,7 +607,11 @@ def heading_level(line, body_size):
 
 
 # ============================== 6) paragraf birleştirme =====================
-def assemble(pages, body_size, opts):
+def assemble(pages, body_size, opts, scanned=False):
+    """scanned=True: kitabın TAMAMI taranmış (metin OCR'dan geliyor). Bu durumda
+    punto ölçüleri oynak olduğu için küçük-punto ayrımına (italik kenar notu)
+    güvenilmez — her şey düz gövde metni olur; başlıklar ise OCR'dan gelmek
+    zorunda olduğu için başlık tanıma AÇIK kalır."""
     flat = [ln for pg in pages for ln in pg["lines"]]
     if not flat:
         return []
@@ -627,7 +641,14 @@ def assemble(pages, body_size, opts):
         return narrow and offset and ln["size"] <= body_size + 0.5
 
     def is_small(ln):
+        if scanned:              # OCR punto oynaklığı: düz metin, tek punto
+            return False
         return opts.asides and body_size and ln["size"] <= body_size * 0.86
+
+    first_page = min((ln["page"] for ln in flat), default=0)
+
+    def front_matter(ln):        # kapak / iç kapak / künye bölgesi
+        return ln["page"] <= first_page + 3
 
     paras = []
     cur = None
@@ -659,9 +680,11 @@ def assemble(pages, body_size, opts):
             prev_heading = True
             continue
 
-        # auto-OCR'lanan kupür/şema sayfalarının manşetleri başlık/içindekiler olmasın
-        allow_heading = opts.headings and not (
-            ln.get("ocr") and getattr(opts, "ocr", "auto") != "full")
+        # Kitabın tümü taranmışsa başlıklar zaten OCR'dan gelmek zorunda: tanıma açık.
+        # Yalnızca "birkaç bozuk sayfa onarıldı" durumunda (kupür/şema) kapatılır ki
+        # gazete manşetleri başlık/içindekiler'e sızmasın.
+        allow_heading = opts.headings and (
+            scanned or not ln.get("ocr") or getattr(opts, "ocr", "auto") == "full")
         hl = heading_level(ln, body_size) if allow_heading else 0
         is_heading = hl > 0
 
@@ -691,13 +714,32 @@ def assemble(pages, body_size, opts):
             if prev and prev["x1"] < short_if and RE_STRONG_END.search(prev["text"].strip()):
                 new_par = True
 
-        # DİL KURALI geometriyi ezer: önceki satır cümle ortasında bittiyse
-        # (tireyle ya da noktalamasız) ve bu satır küçük harfle başlıyorsa, bu
-        # aynı paragrafın devamıdır — sayfa düzeni ne derse desin. Punto oynaklığı
-        # yüzünden satır yanlışlıkla "dipnot/kenar notu" sınıfına düşse bile geçerli.
+        # PARAGRAF DEVAMI kuralları — geometrik tahminleri ezer. Kitapta bir
+        # paragraf cümle ortasında bitmez; bittiği görünüyorsa satır bölünmesidir.
         if (new_par and cur is not None and not is_heading and not prev_heading
-                and cur["type"] in ("p", "aside") and kind in ("p", "aside")
-                and is_continuation(cur["text"], ln["text"])):
+                and cur["type"] in ("p", "aside") and kind in ("p", "aside")):
+            a = cur["text"].strip()
+            closed = bool(RE_STRONG_END.search(a))          # gerçekten cümle bitmiş mi
+            # (1) küçük harfle devam / tireyle bölünmüş kelime
+            if is_continuation(a, ln["text"]):
+                new_par = False
+            # (2) önceki satır virgül, noktalı virgül, tire vb. ile bitmiş:
+            #     sonraki satır BÜYÜK harfle başlasa da (özel ad) devamdır
+            elif RE_OPEN_END.search(a):
+                new_par = False
+            # (3) önceki satır sağ kenara kadar DOLU ve cümle kapanmamış:
+            #     paragrafın son satırı kısa olur; dolu satır demek ki devam ediyor
+            elif (not closed and prev is not None
+                  and prev["x1"] >= right_edge - body_size * 1.2
+                  and ln["x0"] <= indent_thr):
+                new_par = False
+        # (4) KAPAK/İÇ KAPAK: art arda gelen kısa BÜYÜK HARF satırları tek başlık
+        #     parçasıdır ("GLADYO" + "VE" + "ERGENEKON" -> "GLADYO VE ERGENEKON")
+        elif (new_par and cur is not None and front_matter(ln)
+                and cur["type"] == kind and kind in ("p", "h1", "h2", "h3")
+                and all_caps(cur["text"]) and all_caps(ln["text"])
+                and word_count(cur["text"]) <= 6 and word_count(ln["text"]) <= 6
+                and not RE_STRONG_END.search(cur["text"].strip())):
             new_par = False
 
         if new_par:
@@ -931,7 +973,8 @@ def convert(pdf_path, out_path, opts, on_page=None):
     toc_found = replace_toc(pages, body_size) if opts.toc else False
     if opts.headers:
         strip_headers_footers(pages)
-    paras = assemble(pages, body_size, opts)
+    scanned = len(want_ocr) >= max(3, doc.page_count * 0.6) and bool(tessdata)
+    paras = assemble(pages, body_size, opts, scanned=scanned)
 
     ocr_set = set(ocr_done)
     garbage_pages = [p + 1 for p in garbage_idx if p not in ocr_set]
