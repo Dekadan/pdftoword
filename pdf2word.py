@@ -66,6 +66,8 @@ RARE_CHARS = set("ąăĄ*=>~^`|ª•■□▪")
 FN_TOKEN = "⟦FN%d⟧"                    # ⟦FN7⟧ — dipnot yer tutucusu
 RE_FN_TOKEN = re.compile("⟦FN(\\d+)⟧")
 TOC_TOKEN = "⟦TOCFIELD⟧"               # içindekiler alanı yer tutucusu
+IMG_TOKEN = "⟦IMG%d⟧"                  # gazete kupürü/belge sayfası: görüntü olarak koy
+RE_IMG_TOKEN = re.compile(r"^⟦IMG(\d+)⟧$")
 # Dipnot metni başı: "12 Doğu Perinçek…" ya da boşluksuz "12Doğu Perinçek…"
 RE_NOTE_START = re.compile(r"^(\d{1,3})[.)]?(?:\s+(\S.*)|([" + UPPER + r"\"«“].*))$")
 RE_TRAIL_NUM = re.compile(r"\s(\d{1,3})\s*$")     # satır sonuna düşmüş sonraki not numarası
@@ -148,6 +150,19 @@ def ocr_junk(text):
         if tok.isdigit():
             return False          # sayfa numarası vb. — burada eleme
     return True
+
+
+def is_figure_page(texts):
+    """Gazete kupürü / belge faksimilesi sayfası mı? Böyle sayfalarda OCR
+    çöp üretir (tek harfli, kopuk parçalar). Normal metin sayfasında satırların
+    büyük çoğunluğu 5+ kelimedir; kupürde neredeyse hiçbiri değildir.
+    Ölçüldü (Gladyo): kupür %4 / medyan 1 kelime, normal sayfa %93 / medyan 8,
+    dizin sayfası %39 / medyan 4 (dizin KORUNUR)."""
+    if len(texts) < 8:
+        return False
+    wc = [len(t.split()) for t in texts]
+    long_frac = sum(1 for w in wc if w >= 5) / len(wc)
+    return long_frac < 0.15 and statistics.median(wc) <= 2
 
 
 def weird_line(text):
@@ -314,6 +329,13 @@ def extract_pages(doc, ocr_pages=None, tessdata=None, on_page=None):
         lines.sort(key=lambda l: (round(l["y0"], 1), l["x0"]))
         if pno in ocr_pages and tessdata:      # kapak/görsel OCR kırıntılarını at
             lines = [l for l in lines if not ocr_junk(l["text"])]
+            # Gazete kupürü / belge faksimilesi: OCR çöp üretir. Metni atıp
+            # sayfanın kendi görüntüsünü koyacağız (bilgi kaybolmasın).
+            if pno > 3 and is_figure_page([l["text"] for l in lines]):
+                lines = [{
+                    "text": IMG_TOKEN % pno, "x0": 0, "x1": 10, "y0": 0, "y1": 10,
+                    "size": 10, "page": pno, "W": W, "H": H, "ocr": True, "bold": False,
+                }]
         pages.append({"W": W, "H": H, "lines": lines})
     return pages, markers, ocr_done
 
@@ -680,6 +702,16 @@ def assemble(pages, body_size, opts, scanned=False):
             prev_heading = True
             continue
 
+        mimg = RE_IMG_TOKEN.match(ln["text"])
+        if mimg:                       # kupür/belge sayfası -> görüntü olarak
+            flush_aside()
+            push_body()
+            paras.append({"type": "image", "text": ln["text"],
+                          "page": int(mimg.group(1))})
+            prev = ln
+            prev_heading = True        # görüntüden sonra yeni paragraf başlasın
+            continue
+
         # Kitabın tümü taranmışsa başlıklar zaten OCR'dan gelmek zorunda: tanıma açık.
         # Yalnızca "birkaç bozuk sayfa onarıldı" durumunda (kupür/şema) kapatılır ki
         # gazete manşetleri başlık/içindekiler'e sızmasın.
@@ -731,22 +763,26 @@ def assemble(pages, body_size, opts, scanned=False):
                 and cur["type"] in ("p", "aside") and kind in ("p", "aside")):
             a = cur["text"].strip()
             closed = bool(RE_STRONG_END.search(a))          # gerçekten cümle bitmiş mi
-            # (1) küçük harfle devam / tireyle bölünmüş kelime
+            # (1) küçük harfle devam / tireyle bölünmüş kelime — her yerde geçerli
             if is_continuation(a, ln["text"]):
                 new_par = False
-            # (2) önceki satır virgül, noktalı virgül, tire vb. ile bitmiş:
-            #     sonraki satır BÜYÜK harfle başlasa da (özel ad) devamdır
-            elif RE_OPEN_END.search(a):
-                new_par = False
-            # (3) önceki satır sağ kenara kadar DOLU ve cümle kapanmamış:
-            #     paragrafın son satırı kısa olur; dolu satır demek ki devam ediyor
-            elif (not closed and prev is not None
-                  and prev["x1"] >= right_edge - body_size * 1.2
-                  and ln["x0"] <= indent_thr):
-                new_par = False
-        # (4) KAPAK/İÇ KAPAK: art arda gelen kısa BÜYÜK HARF satırları tek başlık
+            # (2)+(3) yalnızca akan gövde metninde: kapak/künye satırları
+            #     birbirinin devamı değildir, orada uygulanmaz
+            elif not front_matter(ln):
+                # (2) önceki satır virgül, noktalı virgül vb. ile bitmiş: sonraki
+                #     satır BÜYÜK harfle başlasa da (özel ad) devamdır
+                if RE_OPEN_END.search(a):
+                    new_par = False
+                # (3) önceki satır sağ kenara kadar DOLU ve cümle kapanmamış:
+                #     paragrafın son satırı kısa olur; dolu satır devam demektir
+                elif (not closed and prev is not None
+                      and prev["x1"] >= right_edge - body_size * 1.2
+                      and ln["x0"] <= indent_thr):
+                    new_par = False
+
+        # (4) KAPAK/İÇ KAPAK: art arda gelen kısa BÜYÜK HARF satırları tek başlığın
         #     parçasıdır ("GLADYO" + "VE" + "ERGENEKON" -> "GLADYO VE ERGENEKON")
-        elif (new_par and cur is not None and front_matter(ln)
+        if (new_par and cur is not None and front_matter(ln)
                 and cur["type"] == kind and kind in ("p", "h1", "h2", "h3")
                 and all_caps(cur["text"]) and all_caps(ln["text"])
                 and word_count(cur["text"]) <= 6 and word_count(ln["text"]) <= 6
@@ -807,7 +843,7 @@ def _add_runs_with_tokens(par, text):
         par.add_run(part)
 
 
-def write_docx(paras, opts, out_path, title, fn_list, toc_found):
+def write_docx(paras, opts, out_path, title, fn_list, toc_found, doc_src=None):
     doc = Document()
 
     sec = doc.sections[0]
@@ -839,6 +875,28 @@ def write_docx(paras, opts, out_path, title, fn_list, toc_found):
             pass
 
     for p in paras:
+        if p["type"] == "image":
+            # Gazete kupürü / belge sayfası: OCR çöpü yerine sayfanın görüntüsü
+            if doc_src is None:
+                continue
+            try:
+                import io
+                pg = doc_src[p["page"]]
+                pix = pg.get_pixmap(dpi=150)
+                stream = io.BytesIO(pix.tobytes("png"))
+                par = doc.add_paragraph()
+                par.paragraph_format.first_line_indent = Cm(0)
+                par.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                par.add_run().add_picture(stream, width=Cm(15.5))
+                cap = doc.add_paragraph()
+                cap.paragraph_format.first_line_indent = Cm(0)
+                cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                cr = cap.add_run(f"[Kitaptaki belge/kupür görseli — kaynak sayfa {p['page'] + 1}]")
+                cr.italic = True
+                cr.font.size = Pt(max(8, opts.size - 2))
+            except Exception:
+                pass
+            continue
         if p["type"] == "toc":
             h = doc.add_heading("İçindekiler", level=1)
             h.paragraph_format.first_line_indent = Cm(0)
@@ -991,10 +1049,11 @@ def convert(pdf_path, out_path, opts, on_page=None):
     garbage_pages = [p + 1 for p in garbage_idx if p not in ocr_set]
 
     title = os.path.splitext(os.path.basename(pdf_path))[0]
-    write_docx(paras, opts, out_path, title, fn_list, toc_found)
+    write_docx(paras, opts, out_path, title, fn_list, toc_found, doc_src=doc)
     return {
         "pages": doc.page_count,
-        "paragraphs": len([p for p in paras if p["text"].strip()]),
+        "paragraphs": len([p for p in paras if p["type"] != "image" and p["text"].strip()]),
+        "figure_pages": [p["page"] + 1 for p in paras if p["type"] == "image"],
         "footnotes": len(fn_list),
         "toc": toc_found,
         "ocr_pages": [p + 1 for p in ocr_done],
@@ -1064,6 +1123,10 @@ def main():
             extra.append(f"{r['footnotes']} gerçek dipnot")
         if r["toc"]:
             extra.append("canlı içindekiler")
+        if r.get("figure_pages"):
+            fp = r["figure_pages"]
+            extra.append(f"{len(fp)} kupür/belge sayfası görüntü olarak eklendi"
+                         if len(fp) > 8 else f"görüntü olarak eklenen sayfalar: {fp}")
         if r.get("ocr_pages"):
             op = r["ocr_pages"]
             extra.append(f"{len(op)} sayfa OCR ile okundu"
