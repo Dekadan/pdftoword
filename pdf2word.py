@@ -41,8 +41,8 @@ except ImportError:
     sys.exit("PyMuPDF gerekli:  pip install pymupdf")
 try:
     from docx import Document
-    from docx.shared import Pt, Cm
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt, Cm, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 except ImportError:
@@ -668,9 +668,13 @@ def assemble(pages, body_size, opts, scanned=False):
         return opts.asides and body_size and ln["size"] <= body_size * 0.86
 
     first_page = min((ln["page"] for ln in flat), default=0)
+    last_page = max((ln["page"] for ln in flat), default=0)
+    # Ön bölüm ayrımı yalnızca gerçek bir kitapta anlamlı; kısa belgede
+    # (birkaç sayfa) her şeyi kapak sanmamak için kapalı.
+    has_front = (last_page - first_page) >= 8
 
     def front_matter(ln):        # kapak / iç kapak / künye bölgesi
-        return ln["page"] <= first_page + 3
+        return has_front and ln["page"] <= first_page + 3
 
     paras = []
     cur = None
@@ -697,7 +701,7 @@ def assemble(pages, body_size, opts, scanned=False):
         if ln["text"] == TOC_TOKEN:
             flush_aside()
             push_body()
-            paras.append({"type": "toc", "text": TOC_TOKEN})
+            paras.append({"type": "toc", "text": TOC_TOKEN, "front": False})
             prev = ln
             prev_heading = True
             continue
@@ -707,7 +711,7 @@ def assemble(pages, body_size, opts, scanned=False):
             flush_aside()
             push_body()
             paras.append({"type": "image", "text": ln["text"],
-                          "page": int(mimg.group(1))})
+                          "page": int(mimg.group(1)), "front": False})
             prev = ln
             prev_heading = True        # görüntüden sonra yeni paragraf başlasın
             continue
@@ -733,7 +737,8 @@ def assemble(pages, body_size, opts, scanned=False):
 
         if not is_heading and cur is not None and is_margin_note(ln):
             if cur_aside is None:
-                cur_aside = {"type": "aside", "text": ln["text"].strip()}
+                cur_aside = {"type": "aside", "text": ln["text"].strip(),
+                             "front": front_matter(ln)}
             else:
                 _join(cur_aside, ln["text"], opts.dehyphen)
             continue
@@ -791,7 +796,8 @@ def assemble(pages, body_size, opts, scanned=False):
 
         if new_par:
             push_body()
-            cur = {"type": kind, "text": ln["text"].strip()}
+            cur = {"type": kind, "text": ln["text"].strip(),
+                   "front": front_matter(ln)}
         else:
             _join(cur, ln["text"], opts.dehyphen)
 
@@ -843,7 +849,98 @@ def _add_runs_with_tokens(par, text):
         par.add_run(part)
 
 
-def write_docx(paras, opts, out_path, title, fn_list, toc_found, doc_src=None):
+RE_IMPRINT = re.compile(
+    r"(©|ISBN|Basım|Basim|Yayın|Yayin|YAYIN|Teknik Hazırlık|Baskı|Tel[:.]|Faks|"
+    r"e-posta|web adresi|Cad\.|Han\b|Sertifika|LTD|Ltd|ŞTİ|Şti|Matbaa)")
+
+
+def _book_identity(pdf_path, front_texts):
+    """Kapak için yazar ve kitap adı. Dosya adı "Yazar - Kitap Adı.pdf"
+    biçimindeyse oradan; değilse kapak sayfasındaki BÜYÜK HARFLİ en uzun
+    satırdan (kitap adı) ve ondan önceki ad satırından çıkarılır."""
+    base = os.path.splitext(os.path.basename(pdf_path))[0]
+    base = re.sub(r"\s*[\(\[].*?[\)\]]\s*", " ", base)          # (Kaynak), [libgen] vb.
+    base = re.sub(r"\s*-\s*libgen.*$", "", base, flags=re.I).strip()
+    if " - " in base:
+        a, t = base.split(" - ", 1)
+        return a.strip(), t.strip()
+    caps = [t for t in front_texts if all_caps(t) and 2 <= len(t) <= 60]
+    title = max(caps, key=len) if caps else base
+    author = ""
+    for t in front_texts:                                        # "Doğu Perinçek" gibi
+        w = t.split()
+        if 2 <= len(w) <= 4 and not all_caps(t) and t[0].isupper() \
+                and not RE_IMPRINT.search(t):
+            author = t
+            break
+    return author, title
+
+
+def _page_break(doc):
+    p = doc.add_paragraph()
+    p.paragraph_format.first_line_indent = Cm(0)
+    p.paragraph_format.space_after = Pt(0)
+    p.add_run().add_break(WD_BREAK.PAGE)
+
+
+def _centered(doc, text, size, bold=False, space_before=0, space_after=6,
+              font=None, italic=False):
+    p = doc.add_paragraph()
+    pf = p.paragraph_format
+    pf.first_line_indent = Cm(0)
+    pf.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    pf.space_before = Pt(space_before)
+    pf.space_after = Pt(space_after)
+    pf.line_spacing = 1.0
+    r = p.add_run(text)
+    r.bold = bold
+    r.italic = italic
+    r.font.size = Pt(size)
+    if font:
+        r.font.name = font
+    return p
+
+
+def _style_headings(doc, opts):
+    """Word'ün hazır Başlık stilleri varsayılan olarak MAVİ ve Calibri'dir.
+    Kitap düzenine çevir: seçilen yazı tipi, siyah, ortalanmış, bölüm başlığı
+    yeni sayfadan başlar."""
+    plan = {
+        "Heading 1": dict(size=opts.size + 5, center=True, page_break=True,
+                          before=0, after=18, caps_bold=True),
+        # Ana bölüm gibi ara bölüm de yeni sayfadan başlar (kitap düzeni);
+        # yalnızca 3. düzey alt başlıklar metnin içinde akar.
+        "Heading 2": dict(size=opts.size + 2, center=True, page_break=True,
+                          before=0, after=16, caps_bold=True),
+        "Heading 3": dict(size=opts.size, center=False, page_break=False,
+                          before=12, after=6, caps_bold=True),
+    }
+    for name, cfg in plan.items():
+        try:
+            st = doc.styles[name]
+        except KeyError:
+            continue
+        st.font.name = opts.font
+        st.font.size = Pt(cfg["size"])
+        st.font.bold = cfg["caps_bold"]
+        st.font.color.rgb = RGBColor(0, 0, 0)          # mavi değil, siyah
+        try:
+            st.element.rPr.rFonts.set(qn("w:eastAsia"), opts.font)
+        except Exception:
+            pass
+        pf = st.paragraph_format
+        pf.alignment = (WD_ALIGN_PARAGRAPH.CENTER if cfg["center"]
+                        else WD_ALIGN_PARAGRAPH.LEFT)
+        pf.first_line_indent = Cm(0)
+        pf.space_before = Pt(cfg["before"])
+        pf.space_after = Pt(cfg["after"])
+        pf.line_spacing = 1.0
+        pf.keep_with_next = True
+        pf.page_break_before = cfg["page_break"]
+
+
+def write_docx(paras, opts, out_path, title, fn_list, toc_found, doc_src=None,
+               pdf_path=None):
     doc = Document()
 
     sec = doc.sections[0]
@@ -855,12 +952,18 @@ def write_docx(paras, opts, out_path, title, fn_list, toc_found, doc_src=None):
     st = doc.styles["Normal"]
     st.font.name = opts.font
     st.font.size = Pt(opts.size)
+    try:
+        st.element.rPr.rFonts.set(qn("w:eastAsia"), opts.font)
+    except Exception:
+        pass
     pf = st.paragraph_format
     pf.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY if opts.align == "both" else WD_ALIGN_PARAGRAPH.LEFT
     pf.line_spacing = opts.spacing
     pf.space_after = Pt(opts.para_space)
     if opts.indent:
         pf.first_line_indent = Cm(1.0)
+
+    _style_headings(doc, opts)
 
     if opts.pagenum:
         fpar = sec.footer.paragraphs[0]
@@ -873,6 +976,31 @@ def write_docx(paras, opts, out_path, title, fn_list, toc_found, doc_src=None):
             doc.settings.element.insert(0, el)   # açılışta alanları (İçindekiler) güncelle
         except Exception:
             pass
+
+    # ---- KAPAK ve KÜNYE sayfaları (kitap düzeni) ----
+    front = []
+    while paras and paras[0].get("front") and paras[0]["type"] not in ("toc", "image"):
+        front.append(paras.pop(0))
+    front_texts = [clean_text(p["text"]) for p in front if p["text"].strip()]
+
+    if front:        # yalnızca gerçek bir kitabın ön bölümü varsa kapak kur
+        author, book_title = _book_identity(pdf_path or title, front_texts)
+
+        # 1) Kapak: yalnızca yazar ve kitap adı, ortada, büyük — başka hiçbir şey
+        for _ in range(7):
+            _centered(doc, "", opts.size, space_after=0)
+        if author:
+            _centered(doc, author, opts.size + 8, bold=False, space_after=14)
+        _centered(doc, book_title.upper(), opts.size + 16, bold=True, space_after=0)
+        _page_break(doc)
+
+        # 2) Künye sayfası: yayın hakları, basım bilgileri, yayınevi (logo yok)
+        imprint = [t for t in front_texts if RE_IMPRINT.search(t)]
+        if imprint:
+            _centered(doc, "", opts.size, space_after=0)
+            for t in imprint:
+                _centered(doc, t, max(9, opts.size - 1), space_after=4)
+            _page_break(doc)
 
     for p in paras:
         if p["type"] == "image":
@@ -898,12 +1026,18 @@ def write_docx(paras, opts, out_path, title, fn_list, toc_found, doc_src=None):
                 pass
             continue
         if p["type"] == "toc":
-            h = doc.add_heading("İçindekiler", level=1)
-            h.paragraph_format.first_line_indent = Cm(0)
+            # Başlık düz paragraf olarak yazılır (Heading olsaydı kendi
+            # içindekiler listesine de girerdi).
+            _centered(doc, "İÇİNDEKİLER", opts.size + 4, bold=True,
+                      space_before=12, space_after=20)
             tp = doc.add_paragraph()
-            tp.paragraph_format.first_line_indent = Cm(0)
-            _field(tp, ' TOC \\o "1-3" \\h \\z \\u ',
+            tpf = tp.paragraph_format
+            tpf.first_line_indent = Cm(0)
+            tpf.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            # \h (köprü) YOK: köprü stili girdileri mavi ve farklı fontla yazıyordu.
+            _field(tp, ' TOC \\o "1-3" \\z \\u ',
                    "İçindekiler — Word'de açınca kendiliğinden dolar (gerekirse F9).")
+            _page_break(doc)
             continue
         txt = clean_text(p["text"])
         if not txt:
@@ -1049,7 +1183,8 @@ def convert(pdf_path, out_path, opts, on_page=None):
     garbage_pages = [p + 1 for p in garbage_idx if p not in ocr_set]
 
     title = os.path.splitext(os.path.basename(pdf_path))[0]
-    write_docx(paras, opts, out_path, title, fn_list, toc_found, doc_src=doc)
+    write_docx(paras, opts, out_path, title, fn_list, toc_found, doc_src=doc,
+               pdf_path=pdf_path)
     return {
         "pages": doc.page_count,
         "paragraphs": len([p for p in paras if p["type"] != "image" and p["text"].strip()]),
