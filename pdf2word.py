@@ -689,6 +689,13 @@ def assemble(pages, body_size, opts, scanned=False):
         # sayılmamalı — yoksa İçindekiler'i kirletirler.
         if allow_heading and front_matter(ln) and not RE_CHAPTER_WORD.search(ln["text"]):
             allow_heading = False
+        # Başlık kısa ve bağımsız bir satırdır: sağ kenara kadar DOLU olan ya da
+        # kelime ortasından tireyle bölünen satır gövde metnidir, başlık değildir.
+        # (OCR punto oynaklığı yüzünden "1980 sonrasında Özal… Erdo-" gibi satırlar
+        #  başlık sanılıyordu.)
+        if allow_heading and (RE_LETTER_HYPHEN.search(ln["text"].strip())
+                              or ln["x1"] >= right_edge - body_size * 1.2):
+            allow_heading = False
         hl = heading_level(ln, body_size) if allow_heading else 0
         is_heading = hl > 0
 
