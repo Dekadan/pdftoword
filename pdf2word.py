@@ -152,6 +152,65 @@ def ocr_junk(text):
     return True
 
 
+def detect_image_bands(page, good_lines, min_h_pt=28.0):
+    """Sayfadaki GÖRSEL bölgeleri (fotoğraf, gazete kupürü, belge faksimilesi,
+    şema, imza) bulur. Mantık: sayfayı yatay şeritlere ayır; mürekkep olan ama
+    içinde düzgün METİN SATIRI bulunmayan şeritler görseldir.
+    Bu bölgeler OCR'a hiç sokulmaz, olduğu gibi resim olarak alınır.
+    Döner: [(y0, y1), ...] PDF punto koordinatlarında."""
+    try:
+        import numpy as np
+    except ImportError:
+        return []
+    dpi = 100
+    try:
+        pix = page.get_pixmap(dpi=dpi, colorspace=fitz.csGRAY)
+    except Exception:
+        return []
+    if pix.n != 1 or pix.height < 10:
+        return []
+    arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width)
+    dark = arr < 165
+    row = dark.mean(axis=1)
+    scale = 72.0 / dpi                       # piksel -> punto
+    inked = row > 0.004
+
+    bands = []                               # mürekkepli şeritler (piksel)
+    start = None
+    gap = 0
+    max_gap = int(dpi * 0.10)                # ~7 pt boşluk aynı bloğa sayılır
+    for i, v in enumerate(inked):
+        if v:
+            if start is None:
+                start = i
+            gap = 0
+        elif start is not None:
+            gap += 1
+            if gap > max_gap:
+                bands.append((start, i - gap))
+                start = None
+    if start is not None:
+        bands.append((start, len(inked) - 1))
+
+    out = []
+    for a, b in bands:
+        y0, y1 = a * scale, b * scale
+        h = y1 - y0
+        if h < min_h_pt:                     # ince şerit: tek satır metin olabilir
+            continue
+        # bu şeritte düzgün metin satırı var mı?
+        covered = 0.0
+        for ln in good_lines:
+            oy0, oy1 = max(y0, ln["y0"]), min(y1, ln["y1"])
+            if oy1 > oy0:
+                covered += (oy1 - oy0)
+        if covered / h < 0.25:               # metin neredeyse yok -> GÖRSEL
+            dens = dark[a:b].mean()
+            if dens > 0.02:                  # gerçekten mürekkep var
+                out.append((max(0.0, y0 - 3), y1 + 3))
+    return out
+
+
 def is_figure_page(texts):
     """Gazete kupürü / belge faksimilesi sayfası mı? Böyle sayfalarda OCR
     çöp üretir (tek harfli, kopuk parçalar). Normal metin sayfasında satırların
@@ -241,7 +300,15 @@ def extract_pages(doc, ocr_pages=None, tessdata=None, on_page=None):
         d = None
         if pno in ocr_pages and tessdata:
             try:
-                tp = page.get_textpage_ocr(language="tur", dpi=300, full=True,
+                # Taramanın kendi çözünürlüğüne göre OCR çözünürlüğü: düşük
+                # çözünürlüklü taramalarda büyütmek okumayı iyileştirir.
+                try:
+                    ph = max(1.0, page.rect.height)
+                    native = max((im[3] for im in page.get_images()), default=0) / ph * 72.0
+                except Exception:
+                    native = 0
+                use_dpi = int(min(400, max(300, native)))
+                tp = page.get_textpage_ocr(language="tur", dpi=use_dpi, full=True,
                                            tessdata=tessdata)
                 d = page.get_text("dict", textpage=tp)
                 ocr_done.append(pno)
@@ -329,12 +396,27 @@ def extract_pages(doc, ocr_pages=None, tessdata=None, on_page=None):
         lines.sort(key=lambda l: (round(l["y0"], 1), l["x0"]))
         if pno in ocr_pages and tessdata:      # kapak/görsel OCR kırıntılarını at
             lines = [l for l in lines if not ocr_junk(l["text"])]
-            # Gazete kupürü / belge faksimilesi: OCR çöp üretir. Metni atıp
-            # sayfanın kendi görüntüsünü koyacağız (bilgi kaybolmasın).
-            if pno > 3 and is_figure_page([l["text"] for l in lines]):
+            # GÖRSEL BÖLGELER: fotoğraf, kupür, belge, şema. OCR'a hiç güvenme;
+            # o bölgeyi olduğu gibi kes, resim olarak koy.
+            good = [l for l in lines
+                    if len(l["text"].split()) >= 4 and not garbage_line(l["text"])]
+            for (by0, by1) in detect_image_bands(page, good):
+                inside = [l for l in lines if l["y0"] >= by0 - 2 and l["y1"] <= by1 + 2]
+                lines = [l for l in lines if l not in inside]
+                lines.append({
+                    "text": IMG_TOKEN % pno, "x0": 0, "x1": 10,
+                    "y0": by0, "y1": by1, "size": 10, "page": pno,
+                    "W": W, "H": H, "ocr": True, "bold": False,
+                    "rect": (0.0, by0, W, by1),
+                })
+            # Tamamı kupür olan sayfa (bölge analizi tutmadıysa yedek ölçüt)
+            lines.sort(key=lambda l: (round(l["y0"], 1), l["x0"]))
+            txts = [l["text"] for l in lines if not RE_IMG_TOKEN.match(l["text"])]
+            if pno > 3 and txts and is_figure_page(txts):
                 lines = [{
-                    "text": IMG_TOKEN % pno, "x0": 0, "x1": 10, "y0": 0, "y1": 10,
+                    "text": IMG_TOKEN % pno, "x0": 0, "x1": 10, "y0": 0, "y1": H,
                     "size": 10, "page": pno, "W": W, "H": H, "ocr": True, "bold": False,
+                    "rect": None,
                 }]
         pages.append({"W": W, "H": H, "lines": lines})
     return pages, markers, ocr_done
@@ -577,27 +659,34 @@ def strip_headers_footers(pages):
         lines = pg["lines"]
         if not lines:
             continue
-        if word_count(lines[0]["text"]) <= 8:
+        if word_count(lines[0]["text"]) <= 8 and not RE_IMG_TOKEN.match(lines[0]["text"]):
             top[norm_hf(lines[0]["text"])] += 1
-        if word_count(lines[-1]["text"]) <= 8:
+        if word_count(lines[-1]["text"]) <= 8 and not RE_IMG_TOKEN.match(lines[-1]["text"]):
             bot[norm_hf(lines[-1]["text"])] += 1
     rep = max(3, round(n * 0.3))
 
     def is_num(s):
         return bool(RE_PAGENUM.match(s) or RE_ROMAN.match(s.strip()))
 
+    def _tok(ln):                 # ⟦IMG5⟧ / ⟦TOCFIELD⟧ gibi yer tutucular
+        return bool(RE_IMG_TOKEN.match(ln["text"])) or ln["text"] == TOC_TOKEN
+
     for pg in pages:
         lines = pg["lines"]
         if len(lines) <= 1:
-            if lines and RE_PAGENUM.match(lines[0]["text"]):
+            if lines and not _tok(lines[0]) and RE_PAGENUM.match(lines[0]["text"]):
                 pg["lines"] = []
             continue
         a, b = 0, len(lines)
         t, bt = lines[0], lines[-1]
-        if is_num(t["text"]) or (word_count(t["text"]) <= 8 and top[norm_hf(t["text"])] >= rep):
+        if _tok(t) and _tok(bt):
+            continue
+        if not _tok(t) and (is_num(t["text"])
+                            or (word_count(t["text"]) <= 8 and top[norm_hf(t["text"])] >= rep)):
             a = 1
-        if b - a > 0 and (is_num(bt["text"]) or
-                          (word_count(bt["text"]) <= 8 and bot[norm_hf(bt["text"])] >= rep)):
+        if b - a > 0 and not _tok(bt) and (
+                is_num(bt["text"])
+                or (word_count(bt["text"]) <= 8 and bot[norm_hf(bt["text"])] >= rep)):
             b -= 1
         pg["lines"] = lines[a:b]
 
@@ -711,7 +800,8 @@ def assemble(pages, body_size, opts, scanned=False):
             flush_aside()
             push_body()
             paras.append({"type": "image", "text": ln["text"],
-                          "page": int(mimg.group(1)), "front": False})
+                          "page": int(mimg.group(1)), "front": False,
+                          "rect": ln.get("rect")})
             prev = ln
             prev_heading = True        # görüntüden sonra yeni paragraf başlasın
             continue
@@ -814,6 +904,54 @@ def fix_apostrophe(text):
         suf = m.group(2)
         return (m.group(1) + suf) if suf in SUFFIX_SET else m.group(0)
     return re.sub(r"([’'])\s+([" + LOWER + r"]+)", repl, text)
+
+
+# Türkçe'ye özgü işaret çiftleri. OCR bu işaretleri sık kaybeder/karıştırır ve
+# sonuç neredeyse her zaman hatadır ("degil", "Aralik", "Müdürlügü").
+DIACRITIC_PAIRS = [("g", "ğ"), ("ğ", "g"), ("i", "ı"), ("ı", "i"), ("c", "ç"),
+                   ("ç", "c"), ("s", "ş"), ("ş", "s"), ("o", "ö"), ("ö", "o"),
+                   ("u", "ü"), ("ü", "u"), ("I", "İ"), ("İ", "I"),
+                   ("G", "Ğ"), ("C", "Ç"), ("S", "Ş"), ("O", "Ö"), ("U", "Ü")]
+
+
+def build_ocr_fixes(paras, min_ratio=8, min_common=5):
+    """Kitabın kendisini sözlük olarak kullanarak GÜVENLİ düzeltme listesi kurar.
+    Yalnızca 'işaret' farkı olan çiftler alınır (degil->değil): bu sınıfta iki
+    biçim de gerçek kelime olma ihtimali çok düşüktür. Harf değişimleri
+    (t<->l, r<->n) gerçek kelime üretebildiği için KASTEN dışarıda bırakılır —
+    yanlış düzeltme, düzeltilmemiş hatadan kötüdür."""
+    from collections import Counter
+    words = []
+    for p in paras:
+        if p["type"] == "image":
+            continue
+        words += re.findall(r"[^\W\d_]+", p["text"], flags=re.UNICODE)
+    cnt = Counter(w for w in words if len(w) >= 4)
+    fixes = {}
+    for w, c in cnt.items():
+        if c > 2:
+            continue                       # sık geçiyorsa hata değildir
+        best = None
+        for i, ch in enumerate(w):
+            for a, b in DIACRITIC_PAIRS:
+                if ch != a:
+                    continue
+                cand = w[:i] + b + w[i + 1:]
+                cc = cnt.get(cand, 0)
+                if cc >= min_common and cc >= min_ratio * c:
+                    if best is None or cc > best[1]:
+                        best = (cand, cc)
+        if best:
+            fixes[w] = best[0]
+    return fixes
+
+
+def apply_fixes(text, fixes):
+    if not fixes:
+        return text
+    return re.sub(r"[^\W\d_]+",
+                  lambda m: fixes.get(m.group(0), m.group(0)),
+                  text, flags=re.UNICODE)
 
 
 def clean_text(text):
@@ -1010,7 +1148,9 @@ def write_docx(paras, opts, out_path, title, fn_list, toc_found, doc_src=None,
             try:
                 import io
                 pg = doc_src[p["page"]]
-                pix = pg.get_pixmap(dpi=150)
+                rc = p.get("rect")
+                clip = fitz.Rect(*rc) if rc else None
+                pix = pg.get_pixmap(dpi=200, clip=clip)
                 stream = io.BytesIO(pix.tobytes("png"))
                 par = doc.add_paragraph()
                 par.paragraph_format.first_line_indent = Cm(0)
@@ -1179,6 +1319,15 @@ def convert(pdf_path, out_path, opts, on_page=None):
     scanned = len(want_ocr) >= max(3, doc.page_count * 0.6) and bool(tessdata)
     paras = assemble(pages, body_size, opts, scanned=scanned)
 
+    # OCR işaret hatalarını (degil->değil) kitabın kendi sıklığına göre onar
+    fixes = {}
+    if ocr_done and getattr(opts, "fixocr", True):
+        fixes = build_ocr_fixes(paras)
+        for p in paras:
+            if p["type"] != "image":
+                p["text"] = apply_fixes(p["text"], fixes)
+        fn_list = [(fid, apply_fixes(t, fixes)) for fid, t in fn_list]
+
     ocr_set = set(ocr_done)
     garbage_pages = [p + 1 for p in garbage_idx if p not in ocr_set]
 
@@ -1192,6 +1341,7 @@ def convert(pdf_path, out_path, opts, on_page=None):
         "footnotes": len(fn_list),
         "toc": toc_found,
         "ocr_pages": [p + 1 for p in ocr_done],
+        "fixes": len(fixes),
         "ocr_missing": ocr_missing,
         "garbage_pages": garbage_pages,
     }
@@ -1218,11 +1368,13 @@ def main():
                     help="İçindekileri canlı alana çevirme")
     ap.add_argument("--no-pagenum", dest="pagenum", action="store_false",
                     help="Altbilgiye sayfa numarası koyma")
+    ap.add_argument("--no-fixocr", dest="fixocr", action="store_false",
+                    help="OCR işaret hatalarını (degil->değil) onarma")
     ap.add_argument("--ocr", choices=["auto", "full", "off"], default="auto",
                     help="OCR: auto=yalnız bozuk/taranmış sayfalar (varsayılan), "
                          "full=tüm sayfalar (taranmış kitap), off=kapalı")
     ap.set_defaults(indent=True, dehyphen=True, headers=True, headings=True,
-                    asides=True, footnotes=True, toc=True, pagenum=True)
+                    asides=True, footnotes=True, toc=True, pagenum=True, fixocr=True)
     opts = ap.parse_args()
 
     def make_progress(label):
@@ -1258,6 +1410,8 @@ def main():
             extra.append(f"{r['footnotes']} gerçek dipnot")
         if r["toc"]:
             extra.append("canlı içindekiler")
+        if r.get("fixes"):
+            extra.append(f"{r['fixes']} OCR yazım hatası onarıldı")
         if r.get("figure_pages"):
             fp = r["figure_pages"]
             extra.append(f"{len(fp)} kupür/belge sayfası görüntü olarak eklendi"

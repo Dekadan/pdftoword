@@ -37,6 +37,21 @@ jobs:
       - name: Bağımlılıklar
         run: pip install -r requirements.txt pyinstaller
 
+      - name: Yüksek doğruluklu Türkçe OCR modelini indir (tessdata_best)
+        shell: bash
+        run: |
+          # Depoda "hızlı" model var (~4 MB). "En iyi" model (~15 MB) belirgin
+          # şekilde daha az OCR hatası üretir; paketlenen uygulamaya onu koy.
+          curl -sSL --retry 3 -o tessdata/tur_best.traineddata \
+            https://github.com/tesseract-ocr/tessdata_best/raw/main/tur.traineddata || true
+          if [ -s tessdata/tur_best.traineddata ]; then
+            mv tessdata/tur_best.traineddata tessdata/tur.traineddata
+            echo "tessdata_best kuruldu ($(wc -c < tessdata/tur.traineddata) bayt)"
+          else
+            rm -f tessdata/tur_best.traineddata
+            echo "UYARI: tessdata_best indirilemedi, depodaki hızlı model kullanılacak"
+          fi
+
       - name: Derle (tek dosya, pencereli; Türkçe OCR dil dosyası gömülü)
         run: pyinstaller --onefile --windowed --name KitapDonusturucu --collect-all fitz --collect-all docx --add-data "tessdata${{ matrix.sep }}tessdata" pdf2word_gui.py
 
