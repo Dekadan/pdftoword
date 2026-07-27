@@ -400,7 +400,10 @@ def extract_pages(doc, ocr_pages=None, tessdata=None, on_page=None):
             # o bölgeyi olduğu gibi kes, resim olarak koy.
             good = [l for l in lines
                     if len(l["text"].split()) >= 4 and not garbage_line(l["text"])]
-            for (by0, by1) in detect_image_bands(page, good):
+            # Kapak/iç kapak/künye sayfaları resme çevrilmez: kapak zaten yazar
+            # ve kitap adıyla yeniden kurulur (kullanıcı temiz kapak istiyor).
+            bands = [] if pno <= 3 else detect_image_bands(page, good)
+            for (by0, by1) in bands:
                 inside = [l for l in lines if l["y0"] >= by0 - 2 and l["y1"] <= by1 + 2]
                 lines = [l for l in lines if l not in inside]
                 lines.append({
