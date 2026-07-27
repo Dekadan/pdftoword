@@ -695,9 +695,20 @@ def strip_headers_footers(pages):
 
 
 # ============================== 5) başlık tanıma ============================
+RE_HEAD_REJECT_END = re.compile(r"[.,;:]$|\b(ve|ile|veya|ya|da|de|ki|ancak|fakat)$")
+
+
 def heading_level(line, body_size):
     t = RE_FN_TOKEN.sub("", line["text"]).strip()
-    if not t or t == TOC_TOKEN or word_count(t) > 14 or weird_line(t):
+    if not t or t == TOC_TOKEN or word_count(t) > 9 or weird_line(t):
+        return 0
+    # Bir kitap başlığı nokta/virgülle bitmez, bağlaçla bitmez, içinde virgül
+    # taşımaz. Bu üç kural, tarih/sayıyla başlayan GÖVDE satırlarının başlık
+    # sanılmasını engeller ("27 Mayıs yönetimi, yalnız ... değil,").
+    core = t.rstrip("»”’\"')]")
+    if RE_HEAD_REJECT_END.search(core) and not RE_CHAPTER_WORD.search(t):
+        return 0
+    if "," in t and not all_caps(t):
         return 0
     letters = [c for c in t if c.isalpha()]
     allcaps = letters and all(c.isupper() for c in letters)
