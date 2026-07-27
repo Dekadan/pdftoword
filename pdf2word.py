@@ -929,7 +929,10 @@ def build_ocr_fixes(paras, min_ratio=8, min_common=5):
     cnt = Counter(w for w in words if len(w) >= 4)
     fixes = {}
     for w, c in cnt.items():
-        if c > 2:
+        # 5+ harfli kelimelerde işaret çifti neredeyse hiç gerçek kelime üretmez
+        # (kısa kelimelerde üretir: kus/kuş, gol/göl) — orada daha ihtiyatlı ol.
+        limit, ratio = (5, 15) if len(w) >= 5 else (2, min_ratio)
+        if c > limit:
             continue                       # sık geçiyorsa hata değildir
         best = None
         for i, ch in enumerate(w):
@@ -938,12 +941,47 @@ def build_ocr_fixes(paras, min_ratio=8, min_common=5):
                     continue
                 cand = w[:i] + b + w[i + 1:]
                 cc = cnt.get(cand, 0)
-                if cc >= min_common and cc >= min_ratio * c:
+                if cc >= min_common and cc >= ratio * c:
                     if best is None or cc > best[1]:
                         best = (cand, cc)
         if best:
             fixes[w] = best[0]
     return fixes
+
+
+# OCR'ın sık karıştırdığı harf çiftleri (işaret DIŞI). Bu sınıfta iki biçim de
+# gerçek kelime olabilir ("terk"/"Türk"), o yüzden DÜZELTİLMEZ — sarı işaretlenir.
+CONFUSE_PAIRS = {("n", "m"), ("m", "n"), ("l", "t"), ("t", "l"), ("r", "n"),
+                 ("n", "r"), ("c", "e"), ("e", "c"), ("l", "i"), ("i", "l"),
+                 ("h", "b"), ("b", "h"), ("v", "y"), ("y", "v"), ("p", "r"),
+                 ("r", "p"), ("a", "e"), ("e", "a"), ("o", "0"), ("i", "ı")}
+
+
+def build_review_flags(paras, min_common=6, min_ratio=8):
+    """Düzeltilmeyen ama ŞÜPHELİ kelimeler: sık geçen bir kelimeden tek harf
+    farklı, kendisi nadir. Otomatik değiştirilmez (yanlış alarm oranı yüksek),
+    Word'de sarı işaretlenir ki editör tek bakışta görsün."""
+    from collections import Counter
+    words = []
+    for p in paras:
+        if p["type"] == "image":
+            continue
+        words += re.findall(r"[^\W\d_]+", p["text"], flags=re.UNICODE)
+    cnt = Counter(w for w in words if len(w) >= 4)
+    common = {w: c for w, c in cnt.items() if c >= min_common}
+    flags = {}
+    for w, c in cnt.items():
+        if c > 2:
+            continue
+        for cand, cc in common.items():
+            if len(cand) != len(w) or cc < min_ratio * c:
+                continue
+            diff = [(x, y) for x, y in zip(w, cand) if x != y]
+            if len(diff) == 1 and (diff[0][0].lower(), diff[0][1].lower()) in CONFUSE_PAIRS:
+                if w not in flags or cc > flags[w][1]:
+                    flags[w] = (cand, cc)
+                break
+    return {w: v[0] for w, v in flags.items()}
 
 
 def apply_fixes(text, fixes):
@@ -978,13 +1016,27 @@ def _field(par, instr, placeholder):
     r._r.append(f)
 
 
-def _add_runs_with_tokens(par, text):
+def _add_runs_with_tokens(par, text, flags=None):
     """Metni yazar; ⟦FN7⟧ tokenlarını KENDİ başına birer run yapar (sonradan
-    gerçek dipnot referansıyla değiştirilir)."""
+    gerçek dipnot referansıyla değiştirilir). flags verilirse şüpheli kelimeler
+    SARI işaretlenir — editör gözden geçirsin diye."""
+    from docx.enum.text import WD_COLOR_INDEX
     for part in re.split("(⟦FN\\d+⟧)", text):
         if not part:
             continue
-        par.add_run(part)
+        if not flags or RE_FN_TOKEN.fullmatch(part):
+            par.add_run(part)
+            continue
+        pos = 0
+        for mw in re.finditer(r"[^\W\d_]+", part, flags=re.UNICODE):
+            if mw.group(0) not in flags:
+                continue
+            if mw.start() > pos:
+                par.add_run(part[pos:mw.start()])
+            r = par.add_run(mw.group(0))
+            r.font.highlight_color = WD_COLOR_INDEX.YELLOW
+            pos = mw.end()
+        par.add_run(part[pos:])
 
 
 RE_IMPRINT = re.compile(
@@ -1078,7 +1130,7 @@ def _style_headings(doc, opts):
 
 
 def write_docx(paras, opts, out_path, title, fn_list, toc_found, doc_src=None,
-               pdf_path=None):
+               pdf_path=None, flags=None):
     doc = Document()
 
     sec = doc.sections[0]
@@ -1185,7 +1237,7 @@ def write_docx(paras, opts, out_path, title, fn_list, toc_found, doc_src=None,
         if p["type"] in ("h1", "h2", "h3"):
             par = doc.add_heading("", level=int(p["type"][1]))
             par.paragraph_format.first_line_indent = Cm(0)
-            _add_runs_with_tokens(par, RE_FN_TOKEN.sub("", txt))
+            _add_runs_with_tokens(par, RE_FN_TOKEN.sub("", txt))   # başlıkta işaret yok
         elif p["type"] == "aside":
             par = doc.add_paragraph()
             par.paragraph_format.first_line_indent = Cm(0)
@@ -1195,7 +1247,7 @@ def write_docx(paras, opts, out_path, title, fn_list, toc_found, doc_src=None,
                 r.font.size = Pt(max(8, opts.size - 1.5))
         else:
             par = doc.add_paragraph()
-            _add_runs_with_tokens(par, txt)
+            _add_runs_with_tokens(par, txt, flags)
 
     doc.core_properties.title = title
     doc.core_properties.author = "pdf2word"
@@ -1328,12 +1380,14 @@ def convert(pdf_path, out_path, opts, on_page=None):
                 p["text"] = apply_fixes(p["text"], fixes)
         fn_list = [(fid, apply_fixes(t, fixes)) for fid, t in fn_list]
 
+    flags = build_review_flags(paras) if (ocr_done and getattr(opts, "review", True)) else {}
+
     ocr_set = set(ocr_done)
     garbage_pages = [p + 1 for p in garbage_idx if p not in ocr_set]
 
     title = os.path.splitext(os.path.basename(pdf_path))[0]
     write_docx(paras, opts, out_path, title, fn_list, toc_found, doc_src=doc,
-               pdf_path=pdf_path)
+               pdf_path=pdf_path, flags=flags)
     return {
         "pages": doc.page_count,
         "paragraphs": len([p for p in paras if p["type"] != "image" and p["text"].strip()]),
@@ -1342,6 +1396,7 @@ def convert(pdf_path, out_path, opts, on_page=None):
         "toc": toc_found,
         "ocr_pages": [p + 1 for p in ocr_done],
         "fixes": len(fixes),
+        "flags": len(flags),
         "ocr_missing": ocr_missing,
         "garbage_pages": garbage_pages,
     }
@@ -1368,13 +1423,15 @@ def main():
                     help="İçindekileri canlı alana çevirme")
     ap.add_argument("--no-pagenum", dest="pagenum", action="store_false",
                     help="Altbilgiye sayfa numarası koyma")
+    ap.add_argument("--no-review", dest="review", action="store_false",
+                    help="Şüpheli kelimeleri sarı işaretleme")
     ap.add_argument("--no-fixocr", dest="fixocr", action="store_false",
                     help="OCR işaret hatalarını (degil->değil) onarma")
     ap.add_argument("--ocr", choices=["auto", "full", "off"], default="auto",
                     help="OCR: auto=yalnız bozuk/taranmış sayfalar (varsayılan), "
                          "full=tüm sayfalar (taranmış kitap), off=kapalı")
     ap.set_defaults(indent=True, dehyphen=True, headers=True, headings=True,
-                    asides=True, footnotes=True, toc=True, pagenum=True, fixocr=True)
+                    asides=True, footnotes=True, toc=True, pagenum=True, fixocr=True, review=True)
     opts = ap.parse_args()
 
     def make_progress(label):
@@ -1410,6 +1467,8 @@ def main():
             extra.append(f"{r['footnotes']} gerçek dipnot")
         if r["toc"]:
             extra.append("canlı içindekiler")
+        if r.get("flags"):
+            extra.append(f"{r['flags']} şüpheli kelime SARI işaretlendi")
         if r.get("fixes"):
             extra.append(f"{r['fixes']} OCR yazım hatası onarıldı")
         if r.get("figure_pages"):
